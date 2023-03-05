@@ -112,7 +112,14 @@ void loop() {
 
   uint16_t mpr121Touched = cap.touched();
   Serial.println(mpr121Touched, BIN);
-
+  for(int i = 0; i<12; i++){
+    Serial.print(i);
+    Serial.print(" : ");    
+    Serial.print(cap.filteredData(i));
+    Serial.print(", ");
+  }
+  Serial.println("");
+/*
   Serial.print("clockRate ");
   Serial.print(clockRate);
   Serial.print("envelopeGenSig1Decay ");
@@ -135,6 +142,7 @@ void loop() {
   Serial.print(complexOscAttenuator);
   Serial.print("envelopeGenSig0Decay ");
   Serial.println(envelopeGenSig0Decay);
+  */
   
   delay(100);
 }
