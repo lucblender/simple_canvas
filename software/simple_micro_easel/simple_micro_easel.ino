@@ -65,11 +65,17 @@ float complexOscFrequency;
 float complexOscAttenuator;
 float envelopeGenSig0Decay;
 
+// ----------------- Seed modules --------------------------------
+static Oscillator osc;
+
+float frequency = 440;
+float sample_rate;
+
 // ----------------- Neopixels -----------------------------------
 
 #define NUMPIXELS 13
 
-Adafruit_NeoPixel pixels(NUMPIXELS, DI_LEDS_DIN, NEO_RGB + NEO_KHZ800);
+Adafruit_NeoPixel pixels(NUMPIXELS, DI_LEDS_DIN, NEO_GRB + NEO_KHZ800);
 
 // ----------------- Capacitive sensor ---------------------------
 #define THRESHOLD_TOUCHED 200
@@ -77,10 +83,32 @@ Adafruit_NeoPixel pixels(NUMPIXELS, DI_LEDS_DIN, NEO_RGB + NEO_KHZ800);
 #define OUTPUT_TOUCH_COUNT 5
 #define TOTAL_TOUCH_COUNT (INPUT_TOUCH_COUNT + OUTPUT_TOUCH_COUNT)
 
+enum SOURCE_MODULE { NONE_SOURCE = -1,
+                     SEQUENCER = 0,
+                     PULSER = 1,
+                     RANDOM = 2,
+                     ENVELOPE_B = 3 };
+
+enum DESTINATION_MODULE { NONE_DEST = -1,
+                          OSC_A_FRQ = 0,
+                          OSC_A_TMBR = 1,
+                          OSC_B_FRQ = 2,
+                          OSC_B_FORM = 3,
+                          OSC_B_ATT = 4 };
 
 uint16_t capacitiveSensorRawValue[TOTAL_TOUCH_COUNT];
 uint8_t capacitiveSensorTouched[TOTAL_TOUCH_COUNT];
 uint8_t capacitiveSensorTouchedOld[TOTAL_TOUCH_COUNT];
+
+int8_t destinationPatches[OUTPUT_TOUCH_COUNT] = {
+  NONE_DEST,
+  NONE_DEST,
+  NONE_DEST,
+  NONE_DEST,
+  NONE_DEST
+};
+
+int8_t highlightedSource = NONE_SOURCE;
 
 Adafruit_MPR121 cap = Adafruit_MPR121();
 
@@ -100,22 +128,30 @@ int8_t inputPressedIndex;
 int8_t outputPressedIndex;
 
 //Blue
-uint32_t sequencerColor = pixels.Color(66, 135, 245);
-uint32_t sequencerColorHighlighted = pixels.Color(0, 89, 232);
+uint32_t sequencerColor = pixels.Color(0, 0, 120);
+uint32_t sequencerColorHighlighted = pixels.Color(0, 0, 255);
 //Yellow
-uint32_t pulserColor = pixels.Color(173, 181, 24);
-uint32_t pulserColorHighlighted = pixels.Color(246, 252, 126);
+uint32_t pulserColor = pixels.Color(100, 100, 0);
+uint32_t pulserColorHighlighted = pixels.Color(200, 200, 0);
 //White
-uint32_t randomColor = pixels.Color(125, 125, 125);
+uint32_t randomColor = pixels.Color(100, 100, 100);
 uint32_t randomColorHighlighted = pixels.Color(200, 200, 200);
 //Green
-uint32_t envelopesColor = pixels.Color(43, 200, 12);
-uint32_t envelopesColorHighlighted = pixels.Color(151, 237, 138);
+uint32_t envelopesColor = pixels.Color(0, 120, 0);
+uint32_t envelopesColorHighlighted = pixels.Color(0, 255, 0);
+
+uint32_t noneColor = pixels.Color(0, 0, 0);
+
+uint32_t sourceColor[5] = { sequencerColor, pulserColor, randomColor, envelopesColor };
+uint32_t sourceColorHighlighted[5] = { sequencerColorHighlighted, pulserColorHighlighted, randomColorHighlighted, envelopesColorHighlighted };
 
 void setup() {
   // put your setup code here, to run once:
 
   Serial.begin(115200);
+
+
+
 
   pinMode(DI_PATCH_IRQ, INPUT);
 
@@ -134,11 +170,22 @@ void setup() {
 
   pixels.begin();
   pixels.clear();  // Set all pixel colors to 'off'
-  pixels.fill(pixels.Color(255, 0, 0));
+
+  for (int i = 0; i < OUTPUT_TOUCH_COUNT; i++) {
+    pixels.setPixelColor(i, sourceColor[i]);
+  }
+
   pixels.show();
 
   // DAISY SETUP
   DAISY.init(DAISY_SEED, AUDIO_SR_48K);
+  sample_rate = DAISY.get_samplerate();
+
+  osc.Init(sample_rate);
+  osc.SetWaveform(osc.WAVE_SIN);
+  osc.SetAmp(1);
+  osc.SetFreq(440);
+
   DAISY.begin(ProcessAudio);
 }
 
@@ -169,8 +216,12 @@ void loop() {
 }
 
 void ProcessAudio(float **in, float **out, size_t size) {
+  for (size_t i = 0; i < size; i++) {
+    float sample = osc.Process();
+    out[0][i] = sample;
+    out[1][i] = sample;
+  }
 }
-
 void sequencerStepsRead() {
 
   //start with all pins to 0
@@ -245,6 +296,26 @@ int8_t capacitiveSensorTouch() {
 
 void capacitiveStateMachine() {
 
+  /*
+enum SOURCE_MODULE { NONE = -1,
+                     SEQUENCER = 0,
+                     PULSER = 1,
+                     RANDOM = 2,
+                     ENVELOPE_B = 3 };
+enum DESTINATION_MODULE { NONE = -1,
+                          OSC_A_FRQ = 0,
+                          OSC_A_TMBR = 1,
+                          OSC_B_FRQ = 2,
+                          OSC_B_FORM = 3,
+                          OSC_B_ATT = 4 };
+int8_t destinationPatches[OUTPUT_TOUCH_COUNT] = { DESTINATION_MODULE.NONE, DESTINATION_MODULE.NONE, DESTINATION_MODULE.NONE, DESTINATION_MODULE.NONE, DESTINATION_MODULE.NONE };
+int8_t highlightedSource = SOURCE_MODULE.NONE;
+
+
+uint32_t sourceColor[5] = {sequencerColor, pulserColor, randomColor, envelopesColor};
+uint32_t sourceColorHighlighted[5] = {sequencerColorHighlighted, pulserColorHighlighted, randomColorHighlighted, envelopesColorHighlighted};
+*/
+
   //TRANSITION
   switch (lastCapacitiveState) {
     case IDLE:
@@ -256,7 +327,7 @@ void capacitiveStateMachine() {
         int8_t sensorTouchIndex = capacitiveSensorTouch();
         if (sensorTouchIndex > -1 && sensorTouchIndex < INPUT_TOUCH_COUNT) {
           capacitiveState = INPUT_PRESSED;
-          inputPressedIndex = sensorTouchIndex;
+          inputPressedIndex = sensorTouchIndex;  //goes from 0 to 4
         }
         break;
       }
@@ -268,15 +339,14 @@ void capacitiveStateMachine() {
     case WAIT_OUTPUT:
       {
         int8_t sensorTouchIndex = capacitiveSensorTouch();
-      if (sensorTouchIndex >= INPUT_TOUCH_COUNT && sensorTouchIndex < (INPUT_TOUCH_COUNT+OUTPUT_TOUCH_COUNT)) {
+        if (sensorTouchIndex >= INPUT_TOUCH_COUNT && sensorTouchIndex < (INPUT_TOUCH_COUNT + OUTPUT_TOUCH_COUNT)) {
           capacitiveState = OUTPUT_PRESSED;
-          outputPressedIndex = sensorTouchIndex;
+          outputPressedIndex = sensorTouchIndex - INPUT_TOUCH_COUNT;  //so it goes from 0 to 5
 
-      }
-      else if (sensorTouchIndex  == inputPressedIndex){ //can only cancel if we repress the same input
+        } else if (sensorTouchIndex == inputPressedIndex) {  //can only cancel if we repress the same input
           capacitiveState = INPUT_CANCELLED;
-      }
-      break;
+        }
+        break;
       }
 
     case OUTPUT_PRESSED:
@@ -303,15 +373,41 @@ void capacitiveStateMachine() {
         break;
       case INPUT_PRESSED:
         DEBUG_PRINTLN("Enter INPUT_PRESSED State");
+
+        pixels.setPixelColor(inputPressedIndex, sourceColorHighlighted[inputPressedIndex]);
+        highlightedSource = SOURCE_MODULE(inputPressedIndex);
+        pixels.show();
+
         break;
       case WAIT_OUTPUT:
         DEBUG_PRINTLN("Enter WAIT_OUTPUT State");
         break;
       case OUTPUT_PRESSED:
         DEBUG_PRINTLN("Enter OUTPUT_PRESSED State");
+        if (destinationPatches[outputPressedIndex] == SOURCE_MODULE(inputPressedIndex)) {
+          // repressed an existing pass --> cancel the patch
+          destinationPatches[outputPressedIndex] = NONE_SOURCE;
+          pixels.setPixelColor(outputPressedIndex + INPUT_TOUCH_COUNT, noneColor);
+          pixels.show();
+        } else {
+          destinationPatches[outputPressedIndex] = SOURCE_MODULE(inputPressedIndex);
+
+          pixels.setPixelColor(outputPressedIndex + INPUT_TOUCH_COUNT, sourceColor[inputPressedIndex]);
+          pixels.show();
+        }
+
+
+        pixels.setPixelColor(inputPressedIndex, sourceColor[inputPressedIndex]);
+        pixels.show();
+        highlightedSource = NONE_SOURCE;
+
         break;
       case INPUT_CANCELLED:
         DEBUG_PRINTLN("Enter INPUT_CANCELLED State");
+
+        pixels.setPixelColor(inputPressedIndex, sourceColor[inputPressedIndex]);
+        pixels.show();
+        highlightedSource = NONE_SOURCE;
         break;
 
       default:
