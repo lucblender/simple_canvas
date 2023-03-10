@@ -3,6 +3,7 @@ using namespace daisysp;
 
 #include <Wire.h>
 #include "Adafruit_MPR121.h"
+#include <Adafruit_MCP23X17.h>
 
 #include <Adafruit_NeoPixel.h>
 
@@ -31,6 +32,7 @@ using namespace daisysp;
 #define AN_ENVELOPEGEN_SIG1DECAY A10
 #define AN_ENVELOPEGEN_SLOPESHAPE A11
 
+//Digital input gpio definition
 #define DI_MIDIIN 1
 #define DI_MIDIOUT 2
 #define DI_SEQUENCER_STEPSELECT0 4
@@ -50,8 +52,27 @@ using namespace daisysp;
 #define DI_INTA 14
 #define DI_LEDS_DIN 26
 
+//Digital input gpio expander gpio definition
+#define DI_SEQUENCER_TRIGGER 0
+#define DI_SEQUENCER_STAGE0 1
+#define DI_SEQUENCER_STAGE1 2
+#define DI_RANDOM_TRIGGERSELECT0 3
+#define DI_RANDOM_TRIGGERSELECT1 4
+#define DI_PULSER_TRIGGERSELECT0 5
+#define DI_PULSER_TRIGGERSELECT1 6
+#define DI_MODOSC_AMFM 7
+#define DI_COMPLEXOSC_WAVEFORM0 8
+#define DI_COMPLEXOSC_WAVEFORM1 9
+#define DI_ENVELOPEGEN_SIG0SELECTOR0 10
+#define DI_ENVELOPEGEN_SIG0SELECTOR1 11
+#define DI_ENVELOPEGEN_SIG0LPGVCA 12
+#define DI_ENVELOPEGEN_SIG1SELECTOR0 13
+#define DI_ENVELOPEGEN_SIG1SELECTOR1 14
+#define DI_ENVELOPEGEN_SIG1LPGVCA 15
+
 uint8_t DI_SEQUENCER_STEPSELECT[5] = { DI_SEQUENCER_STEPSELECT0, DI_SEQUENCER_STEPSELECT1, DI_SEQUENCER_STEPSELECT2, DI_SEQUENCER_STEPSELECT3, DI_SEQUENCER_STEPSELECT4 };
 
+//analog pins value
 float sequencerStepAnalogIn[5];
 float clockRate;
 float envelopeGenSig1Decay;
@@ -64,6 +85,34 @@ float complexOscTimbre;
 float complexOscFrequency;
 float complexOscAttenuator;
 float envelopeGenSig0Decay;
+
+// ditial pins value
+uint8_t sequencerStep4 = 0;
+uint8_t sequencerStep3 = 0;
+uint8_t sequencerStep2 = 0;
+uint8_t sequencerStep1 = 0;
+uint8_t sequencerStep0 = 0;
+
+// mcp pins value
+uint8_t sequencerTrigger = 0;
+uint8_t sequencerStage0 = 0;
+uint8_t sequencerStage1 = 0;
+uint8_t randomTriggerSelect0 = 0;
+uint8_t randomTriggerSelect1 = 0;
+uint8_t pulserTriggerSelect0 = 0;
+uint8_t pulserTriggerSelect1 = 0;
+uint8_t modOscAmFm = 0;
+uint8_t complexOscWaveform0 = 0;
+uint8_t complexOscWaveform1 = 0;
+uint8_t envelopeGenSig0Selector0 = 0;
+uint8_t envelopeGenSig0Selector1 = 0;
+uint8_t envelopeGenSig0LpgVca = 0;
+uint8_t envelopeGenSig1Selector0 = 0;
+uint8_t envelopeGenSig1Selector1 = 0;
+uint8_t envelopeGenSig1LpgVca = 0;
+
+// --------------------- Gpio expander --------------------------
+Adafruit_MCP23X17 mcp;
 
 // ----------------- Seed modules --------------------------------
 static Oscillator osc;
@@ -168,6 +217,38 @@ void setup() {
   }
   Serial.println("MPR121 found!");
 
+  if (!mcp.begin_I2C()) {
+    Serial.println("MCP not found, check wiring?");
+    while (1)
+      ;
+  }
+  Serial.println("MCP found!");
+
+  mcp.pinMode(DI_SEQUENCER_TRIGGER, INPUT_PULLUP);
+  mcp.pinMode(DI_SEQUENCER_STAGE0, INPUT_PULLUP);
+  mcp.pinMode(DI_SEQUENCER_STAGE1, INPUT_PULLUP);
+  mcp.pinMode(DI_RANDOM_TRIGGERSELECT0, INPUT_PULLUP);
+  mcp.pinMode(DI_RANDOM_TRIGGERSELECT1, INPUT_PULLUP);
+  mcp.pinMode(DI_PULSER_TRIGGERSELECT0, INPUT_PULLUP);
+  mcp.pinMode(DI_PULSER_TRIGGERSELECT1, INPUT_PULLUP);
+  mcp.pinMode(DI_MODOSC_AMFM, INPUT_PULLUP);
+  mcp.pinMode(DI_COMPLEXOSC_WAVEFORM0, INPUT_PULLUP);
+  mcp.pinMode(DI_COMPLEXOSC_WAVEFORM1, INPUT_PULLUP);
+  mcp.pinMode(DI_ENVELOPEGEN_SIG0SELECTOR0, INPUT_PULLUP);
+  mcp.pinMode(DI_ENVELOPEGEN_SIG0SELECTOR1, INPUT_PULLUP);
+  mcp.pinMode(DI_ENVELOPEGEN_SIG0LPGVCA, INPUT_PULLUP);
+  mcp.pinMode(DI_ENVELOPEGEN_SIG1SELECTOR0, INPUT_PULLUP);
+  mcp.pinMode(DI_ENVELOPEGEN_SIG1SELECTOR1, INPUT_PULLUP);
+  mcp.pinMode(DI_ENVELOPEGEN_SIG1LPGVCA, INPUT_PULLUP);
+
+  pinMode(DI_INTB, INPUT);
+  pinMode(DI_INTA, INPUT);
+
+  pinMode(DI_SEQUENCER_STEP4, INPUT_PULLUP);
+  pinMode(DI_SEQUENCER_STEP3, INPUT_PULLUP);
+  pinMode(DI_SEQUENCER_STEP2, INPUT_PULLUP);
+  pinMode(DI_SEQUENCER_STEP1, INPUT_PULLUP);
+  pinMode(DI_SEQUENCER_STEP0, INPUT_PULLUP);
   pixels.begin();
   pixels.clear();  // Set all pixel colors to 'off'
 
@@ -190,27 +271,7 @@ void setup() {
 }
 
 void loop() {
-  // put your main code here, to run repeatedly:
-
-  //sequencerStepsRead();
-
-
-  clockRate = simpleAnalogRead(AN_CLOCK_RATE);
-  envelopeGenSig1Decay = simpleAnalogRead(AN_PULSER_PERIOD);
-  envelopeGenSlopeShape = simpleAnalogRead(AN_MODOSC_FREQUENCY);
-  pulserPeriod = simpleAnalogRead(AN_MODOSC_WAVEFORM);
-  modOscFrequency = simpleAnalogRead(AN_MODOSC_ATTENUATOR);
-  modOscWaveform = simpleAnalogRead(AN_COMPLEXOSC_TIMBRE);
-  modOscAttenuator = simpleAnalogRead(AN_COMPLEXOSC_FREQUENCY);
-  complexOscTimbre = simpleAnalogRead(AN_COMPLEXOSC_ATTENUATOR);
-  complexOscFrequency = simpleAnalogRead(AN_ENVELOPEGEN_SIG0DECAY);
-  complexOscAttenuator = simpleAnalogRead(AN_ENVELOPEGEN_SIG1DECAY);
-  envelopeGenSig0Decay = simpleAnalogRead(AN_ENVELOPEGEN_SLOPESHAPE);
-
-
   capacitiveStateMachine();
-
-
 
   delay(10);
 }
@@ -222,6 +283,48 @@ void ProcessAudio(float **in, float **out, size_t size) {
     out[1][i] = sample;
   }
 }
+
+void digitalPinsread() {
+  sequencerStep0 = digitalRead(DI_SEQUENCER_STEP0);
+  sequencerStep1 = digitalRead(DI_SEQUENCER_STEP1);
+  sequencerStep2 = digitalRead(DI_SEQUENCER_STEP2);
+  sequencerStep3 = digitalRead(DI_SEQUENCER_STEP3);
+  sequencerStep4 = digitalRead(DI_SEQUENCER_STEP4);
+}
+
+void mcpPinsRead() {
+  sequencerTrigger = mcp.digitalRead(DI_SEQUENCER_TRIGGER);
+  sequencerStage0 = mcp.digitalRead(DI_SEQUENCER_STAGE0);
+  sequencerStage1 = mcp.digitalRead(DI_SEQUENCER_STAGE1);
+  randomTriggerSelect0 = mcp.digitalRead(DI_RANDOM_TRIGGERSELECT0);
+  randomTriggerSelect1 = mcp.digitalRead(DI_RANDOM_TRIGGERSELECT1);
+  pulserTriggerSelect0 = mcp.digitalRead(DI_PULSER_TRIGGERSELECT0);
+  pulserTriggerSelect1 = mcp.digitalRead(DI_PULSER_TRIGGERSELECT1);
+  modOscAmFm = mcp.digitalRead(DI_MODOSC_AMFM);
+  complexOscWaveform0 = mcp.digitalRead(DI_COMPLEXOSC_WAVEFORM0);
+  complexOscWaveform1 = mcp.digitalRead(DI_COMPLEXOSC_WAVEFORM1);
+  envelopeGenSig0Selector0 = mcp.digitalRead(DI_ENVELOPEGEN_SIG0SELECTOR0);
+  envelopeGenSig0Selector1 = mcp.digitalRead(DI_ENVELOPEGEN_SIG0SELECTOR1);
+  envelopeGenSig0LpgVca = mcp.digitalRead(DI_ENVELOPEGEN_SIG0LPGVCA);
+  envelopeGenSig1Selector0 = mcp.digitalRead(DI_ENVELOPEGEN_SIG1SELECTOR0);
+  envelopeGenSig1Selector1 = mcp.digitalRead(DI_ENVELOPEGEN_SIG1SELECTOR1);
+  envelopeGenSig1LpgVca = mcp.digitalRead(DI_ENVELOPEGEN_SIG1LPGVCA);
+}
+
+void analogsRead() {
+  clockRate = simpleAnalogRead(AN_CLOCK_RATE);
+  pulserPeriod = simpleAnalogRead(AN_PULSER_PERIOD);
+  modOscFrequency = simpleAnalogRead(AN_MODOSC_FREQUENCY);
+  modOscWaveform = simpleAnalogRead(AN_MODOSC_WAVEFORM);
+  modOscAttenuator = simpleAnalogRead(AN_MODOSC_ATTENUATOR);
+  complexOscTimbre = simpleAnalogRead(AN_COMPLEXOSC_TIMBRE);
+  complexOscFrequency = simpleAnalogRead(AN_COMPLEXOSC_FREQUENCY);
+  complexOscAttenuator = simpleAnalogRead(AN_COMPLEXOSC_ATTENUATOR);
+  envelopeGenSig0Decay = simpleAnalogRead(AN_ENVELOPEGEN_SIG0DECAY);
+  envelopeGenSig1Decay = simpleAnalogRead(AN_ENVELOPEGEN_SIG1DECAY);
+  envelopeGenSlopeShape = simpleAnalogRead(AN_ENVELOPEGEN_SLOPESHAPE);
+}
+
 void sequencerStepsRead() {
 
   //start with all pins to 0
@@ -295,26 +398,6 @@ int8_t capacitiveSensorTouch() {
 }
 
 void capacitiveStateMachine() {
-
-  /*
-enum SOURCE_MODULE { NONE = -1,
-                     SEQUENCER = 0,
-                     PULSER = 1,
-                     RANDOM = 2,
-                     ENVELOPE_B = 3 };
-enum DESTINATION_MODULE { NONE = -1,
-                          OSC_A_FRQ = 0,
-                          OSC_A_TMBR = 1,
-                          OSC_B_FRQ = 2,
-                          OSC_B_FORM = 3,
-                          OSC_B_ATT = 4 };
-int8_t destinationPatches[OUTPUT_TOUCH_COUNT] = { DESTINATION_MODULE.NONE, DESTINATION_MODULE.NONE, DESTINATION_MODULE.NONE, DESTINATION_MODULE.NONE, DESTINATION_MODULE.NONE };
-int8_t highlightedSource = SOURCE_MODULE.NONE;
-
-
-uint32_t sourceColor[5] = {sequencerColor, pulserColor, randomColor, envelopesColor};
-uint32_t sourceColorHighlighted[5] = {sequencerColorHighlighted, pulserColorHighlighted, randomColorHighlighted, envelopesColorHighlighted};
-*/
 
   //TRANSITION
   switch (lastCapacitiveState) {
