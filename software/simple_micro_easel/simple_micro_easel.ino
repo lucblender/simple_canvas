@@ -18,6 +18,7 @@ using namespace daisysp;
 #define DEBUG_PRINTLN(x)
 #endif
 
+#define DEFAULT_VALUE 5  //put a default value that is not possible to be sure all pins are initialized correctly
 
 #define AN_SEQUENCER_STEPANALOGIN A0
 #define AN_CLOCK_RATE A1
@@ -65,9 +66,9 @@ using namespace daisysp;
 #define DI_COMPLEXOSC_WAVEFORM1 9
 #define DI_ENVELOPEGEN_SIG0SELECTOR0 10
 #define DI_ENVELOPEGEN_SIG0SELECTOR1 11
-#define DI_ENVELOPEGEN_SIG0LPGVCA 12
-#define DI_ENVELOPEGEN_SIG1SELECTOR0 13
-#define DI_ENVELOPEGEN_SIG1SELECTOR1 14
+#define DI_ENVELOPEGEN_SIG1SELECTOR0 12
+#define DI_ENVELOPEGEN_SIG1SELECTOR1 13
+#define DI_ENVELOPEGEN_SIG0LPGVCA 14
 #define DI_ENVELOPEGEN_SIG1LPGVCA 15
 
 uint8_t DI_SEQUENCER_STEPSELECT[5] = { DI_SEQUENCER_STEPSELECT0, DI_SEQUENCER_STEPSELECT1, DI_SEQUENCER_STEPSELECT2, DI_SEQUENCER_STEPSELECT3, DI_SEQUENCER_STEPSELECT4 };
@@ -76,7 +77,7 @@ uint8_t DI_SEQUENCER_STEPSELECT[5] = { DI_SEQUENCER_STEPSELECT0, DI_SEQUENCER_ST
 float sequencerStepAnalogIn[5];
 float clockRate;
 float envelopeGenSig1Decay;
-float envelopeGenSlopeShape;
+int envelopeGenSlopeShape;
 float pulserPeriod;
 float modOscFrequency;
 float modOscWaveform;
@@ -86,6 +87,9 @@ float complexOscFrequency;
 float complexOscAttenuator;
 float envelopeGenSig0Decay;
 
+float modOscFrequencyOld = DEFAULT_VALUE;
+float complexOscFrequencyOld = DEFAULT_VALUE;
+
 // ditial pins value
 uint8_t sequencerStep4 = 0;
 uint8_t sequencerStep3 = 0;
@@ -93,29 +97,43 @@ uint8_t sequencerStep2 = 0;
 uint8_t sequencerStep1 = 0;
 uint8_t sequencerStep0 = 0;
 
+uint8_t sequencerStep4Old = DEFAULT_VALUE;
+uint8_t sequencerStep3Old = DEFAULT_VALUE;
+uint8_t sequencerStep2Old = DEFAULT_VALUE;
+uint8_t sequencerStep1Old = DEFAULT_VALUE;
+uint8_t sequencerStep0Old = DEFAULT_VALUE;
+
 // mcp pins value
 uint8_t sequencerTrigger = 0;
-uint8_t sequencerStage0 = 0;
-uint8_t sequencerStage1 = 0;
-uint8_t randomTriggerSelect0 = 0;
-uint8_t randomTriggerSelect1 = 0;
-uint8_t pulserTriggerSelect0 = 0;
-uint8_t pulserTriggerSelect1 = 0;
+uint8_t sequencerStage = 0;
+uint8_t randomTriggerSelect = 0;
+uint8_t pulserTriggerSelect = 0;
 uint8_t modOscAmFm = 0;
-uint8_t complexOscWaveform0 = 0;
-uint8_t complexOscWaveform1 = 0;
-uint8_t envelopeGenSig0Selector0 = 0;
-uint8_t envelopeGenSig0Selector1 = 0;
+uint8_t complexOscWaveform = 0;
+uint8_t envelopeGenSig0Selector = 0;
 uint8_t envelopeGenSig0LpgVca = 0;
-uint8_t envelopeGenSig1Selector0 = 0;
-uint8_t envelopeGenSig1Selector1 = 0;
+uint8_t envelopeGenSig1Selector = 0;
 uint8_t envelopeGenSig1LpgVca = 0;
+
+uint8_t sequencerTriggerOld = DEFAULT_VALUE;
+uint8_t sequencerStageOld = DEFAULT_VALUE;
+uint8_t randomTriggerSelectOld = DEFAULT_VALUE;
+uint8_t pulserTriggerSelectOld = DEFAULT_VALUE;
+uint8_t modOscAmFmOld = DEFAULT_VALUE;
+uint8_t complexOscWaveformOld = DEFAULT_VALUE;
+uint8_t envelopeGenSig0SelectorOld = DEFAULT_VALUE;
+uint8_t envelopeGenSig0LpgVcaOld = DEFAULT_VALUE;
+uint8_t envelopeGenSig1SelectorOld = DEFAULT_VALUE;
+uint8_t envelopeGenSig1LpgVcaOld = DEFAULT_VALUE;
 
 // --------------------- Gpio expander --------------------------
 Adafruit_MCP23X17 mcp;
 
 // ----------------- Seed modules --------------------------------
 static Oscillator osc;
+
+static Oscillator complexOscSinus;
+static VariableShapeOscillator complexOscBasis;
 
 float frequency = 440;
 float sample_rate;
@@ -262,25 +280,39 @@ void setup() {
   DAISY.init(DAISY_SEED, AUDIO_SR_48K);
   sample_rate = DAISY.get_samplerate();
 
+  // init complex oscillators
   osc.Init(sample_rate);
-  osc.SetWaveform(osc.WAVE_SIN);
-  osc.SetAmp(1);
-  osc.SetFreq(440);
+  complexOscSinus.Init(sample_rate);
+  complexOscSinus.SetWaveform(osc.WAVE_SIN);
+  complexOscSinus.SetAmp(1);
+
+  complexOscBasis.Init(sample_rate);
+
+  setComplexOscillatorFrequency(220);
+
 
   DAISY.begin(ProcessAudio);
 }
 
 void loop() {
   capacitiveStateMachine();
+  digitalPinsread();
+  mcpPinsRead();
+  analogsRead();
 
   delay(10);
 }
 
 void ProcessAudio(float **in, float **out, size_t size) {
   for (size_t i = 0; i < size; i++) {
-    float sample = osc.Process();
-    out[0][i] = sample;
-    out[1][i] = sample;
+
+    float complexSinusSample = complexOscSinus.Process();
+    float complexBasisSample = complexOscBasis.Process();
+
+    float complexMixed = (1.0 - complexOscTimbre) * complexSinusSample + complexOscTimbre * complexBasisSample;
+
+    out[0][i] = complexMixed;
+    out[1][i] = complexMixed;
   }
 }
 
@@ -290,39 +322,136 @@ void digitalPinsread() {
   sequencerStep2 = digitalRead(DI_SEQUENCER_STEP2);
   sequencerStep3 = digitalRead(DI_SEQUENCER_STEP3);
   sequencerStep4 = digitalRead(DI_SEQUENCER_STEP4);
+
+  if (sequencerStep0Old != sequencerStep0) {  //0 disabled 1 enabled
+    Serial.print("sequencerStep0 ");
+    Serial.println(sequencerStep0);
+  };
+  if (sequencerStep1Old != sequencerStep1) {  //0 disabled 1 enabled
+    Serial.print("sequencerStep1 ");
+    Serial.println(sequencerStep1);
+  };
+  if (sequencerStep2Old != sequencerStep2) {  //0 disabled 1 enabled
+    Serial.print("sequencerStep2 ");
+    Serial.println(sequencerStep2);
+  };
+  if (sequencerStep3Old != sequencerStep3) {  //0 disabled 1 enabled
+    Serial.print("sequencerStep3 ");
+    Serial.println(sequencerStep3);
+  };
+  if (sequencerStep4Old != sequencerStep4) {  //0 disabled 1 enabled
+    Serial.print("sequencerStep4 ");
+    Serial.println(sequencerStep4);
+  };
+
+  sequencerStep0Old = sequencerStep0;
+  sequencerStep1Old = sequencerStep1;
+  sequencerStep2Old = sequencerStep2;
+  sequencerStep3Old = sequencerStep3;
+  sequencerStep4Old = sequencerStep4;
 }
 
 void mcpPinsRead() {
   sequencerTrigger = mcp.digitalRead(DI_SEQUENCER_TRIGGER);
-  sequencerStage0 = mcp.digitalRead(DI_SEQUENCER_STAGE0);
-  sequencerStage1 = mcp.digitalRead(DI_SEQUENCER_STAGE1);
-  randomTriggerSelect0 = mcp.digitalRead(DI_RANDOM_TRIGGERSELECT0);
-  randomTriggerSelect1 = mcp.digitalRead(DI_RANDOM_TRIGGERSELECT1);
-  pulserTriggerSelect0 = mcp.digitalRead(DI_PULSER_TRIGGERSELECT0);
-  pulserTriggerSelect1 = mcp.digitalRead(DI_PULSER_TRIGGERSELECT1);
+  sequencerStage = mcp.digitalRead(DI_SEQUENCER_STAGE0) + 2 * mcp.digitalRead(DI_SEQUENCER_STAGE1);
+  randomTriggerSelect = mcp.digitalRead(DI_RANDOM_TRIGGERSELECT0) + 2 * mcp.digitalRead(DI_RANDOM_TRIGGERSELECT1);
+  pulserTriggerSelect = mcp.digitalRead(DI_PULSER_TRIGGERSELECT0) + 2 * mcp.digitalRead(DI_PULSER_TRIGGERSELECT1);
   modOscAmFm = mcp.digitalRead(DI_MODOSC_AMFM);
-  complexOscWaveform0 = mcp.digitalRead(DI_COMPLEXOSC_WAVEFORM0);
-  complexOscWaveform1 = mcp.digitalRead(DI_COMPLEXOSC_WAVEFORM1);
-  envelopeGenSig0Selector0 = mcp.digitalRead(DI_ENVELOPEGEN_SIG0SELECTOR0);
-  envelopeGenSig0Selector1 = mcp.digitalRead(DI_ENVELOPEGEN_SIG0SELECTOR1);
+  complexOscWaveform = mcp.digitalRead(DI_COMPLEXOSC_WAVEFORM0) + 2 * mcp.digitalRead(DI_COMPLEXOSC_WAVEFORM1);
+  envelopeGenSig0Selector = mcp.digitalRead(DI_ENVELOPEGEN_SIG0SELECTOR0) + 2 * mcp.digitalRead(DI_ENVELOPEGEN_SIG0SELECTOR1);
   envelopeGenSig0LpgVca = mcp.digitalRead(DI_ENVELOPEGEN_SIG0LPGVCA);
-  envelopeGenSig1Selector0 = mcp.digitalRead(DI_ENVELOPEGEN_SIG1SELECTOR0);
-  envelopeGenSig1Selector1 = mcp.digitalRead(DI_ENVELOPEGEN_SIG1SELECTOR1);
+  envelopeGenSig1Selector = mcp.digitalRead(DI_ENVELOPEGEN_SIG1SELECTOR0) + 2 * mcp.digitalRead(DI_ENVELOPEGEN_SIG1SELECTOR1);
   envelopeGenSig1LpgVca = mcp.digitalRead(DI_ENVELOPEGEN_SIG1LPGVCA);
+
+  if (sequencerTriggerOld != sequencerTrigger) {  // 0 clock, 1 pulser
+    Serial.print("sequencerTrigger ");
+    Serial.println(sequencerTrigger);
+  }
+  if (sequencerStageOld != sequencerStage) {  // 2 = 3steps, 3 = 4steps, 1 = 5steps
+    Serial.print("sequencerStage ");
+    Serial.println(sequencerStage);
+  }
+  if (randomTriggerSelectOld != randomTriggerSelect) {  //2 = pulser, 3 = clock, 1 = sequencer
+    Serial.print("randomTriggerSelect ");
+    Serial.println(randomTriggerSelect);
+  }
+  if (pulserTriggerSelectOld != pulserTriggerSelect) {  //2 = pulser, 3 = clock, 1 = sequencer
+    Serial.print("pulserTriggerSelect ");
+    Serial.println(pulserTriggerSelect);
+  }
+  if (modOscAmFmOld != modOscAmFm) {  //0 = AM, 1 = FM
+    Serial.print("modOscAmFm ");
+    Serial.println(modOscAmFm);
+  }
+
+  if (complexOscWaveformOld != complexOscWaveform) {  // 2 = small pulse, 3 = square, 1 = triangle
+    Serial.print("complexOscWaveform ");
+    Serial.println(complexOscWaveform);
+
+    if (complexOscWaveform == 2) {
+      complexOscBasis.SetPW(0.95f);
+      complexOscBasis.SetWaveshape(1.0f);  // 1 = square
+    } else if (complexOscWaveform == 3) {
+      complexOscBasis.SetPW(0.5f);
+      complexOscBasis.SetWaveshape(1.0f);
+    } else if (complexOscWaveform == 1) {
+      complexOscBasis.SetPW(0.5f);
+      complexOscBasis.SetWaveshape(0.0f);  //0 = triangle
+    }
+  }
+
+  if (envelopeGenSig0SelectorOld != envelopeGenSig0Selector) {  // 2 = pulser, 3 = clock, 1 = sequencer
+    Serial.print("envelopeGenSig0Selector ");
+    Serial.println(envelopeGenSig0Selector);
+  }
+  if (envelopeGenSig0LpgVcaOld != envelopeGenSig0LpgVca) {  // 0 = LPG, 1 = VCA
+    Serial.print("envelopeGenSig0LpgVca ");
+    Serial.println(envelopeGenSig0LpgVca);
+  }
+  if (envelopeGenSig1SelectorOld != envelopeGenSig1Selector) {  // 2 = pulser, 3 = clock, 1 = sequencer
+    Serial.print("envelopeGenSig1Selector ");
+    Serial.println(envelopeGenSig1Selector);
+  }
+  if (envelopeGenSig1LpgVcaOld != envelopeGenSig1LpgVca) {  // 0 = LPG, 1 = VCA
+    Serial.print("envelopeGenSig1LpgVca ");
+    Serial.println(envelopeGenSig1LpgVca);
+  }
+
+  sequencerTriggerOld = sequencerTrigger;
+  sequencerStageOld = sequencerStage;
+  randomTriggerSelectOld = randomTriggerSelect;
+  pulserTriggerSelectOld = pulserTriggerSelect;
+  modOscAmFmOld = modOscAmFm;
+  complexOscWaveformOld = complexOscWaveform;
+  envelopeGenSig0SelectorOld = envelopeGenSig0Selector;
+  envelopeGenSig0LpgVcaOld = envelopeGenSig0LpgVca;
+  envelopeGenSig1SelectorOld = envelopeGenSig1Selector;
+  envelopeGenSig1LpgVcaOld = envelopeGenSig1LpgVca;
 }
 
 void analogsRead() {
   clockRate = simpleAnalogRead(AN_CLOCK_RATE);
   pulserPeriod = simpleAnalogRead(AN_PULSER_PERIOD);
-  modOscFrequency = simpleAnalogRead(AN_MODOSC_FREQUENCY);
+  modOscFrequency = simpleAnalogReadAndMap(AN_MODOSC_FREQUENCY, 0, 8000);
   modOscWaveform = simpleAnalogRead(AN_MODOSC_WAVEFORM);
   modOscAttenuator = simpleAnalogRead(AN_MODOSC_ATTENUATOR);
   complexOscTimbre = simpleAnalogRead(AN_COMPLEXOSC_TIMBRE);
-  complexOscFrequency = simpleAnalogRead(AN_COMPLEXOSC_FREQUENCY);
+  complexOscFrequency = complexOscFrequency*0.9 + 0.1*simpleAnalogReadAndMap(AN_COMPLEXOSC_FREQUENCY, 0, 8000);
   complexOscAttenuator = simpleAnalogRead(AN_COMPLEXOSC_ATTENUATOR);
   envelopeGenSig0Decay = simpleAnalogRead(AN_ENVELOPEGEN_SIG0DECAY);
   envelopeGenSig1Decay = simpleAnalogRead(AN_ENVELOPEGEN_SIG1DECAY);
-  envelopeGenSlopeShape = simpleAnalogRead(AN_ENVELOPEGEN_SLOPESHAPE);
+  envelopeGenSlopeShape = (int)simpleAnalogReadAndMap(AN_ENVELOPEGEN_SLOPESHAPE, 0, 6.5);
+
+  if (abs(complexOscFrequencyOld - complexOscFrequency) > 5) {
+    setComplexOscillatorFrequency(complexOscFrequency);
+    Serial.println(abs(complexOscFrequencyOld - complexOscFrequency));
+  }
+  complexOscFrequencyOld = complexOscFrequency;
+
+  if (modOscFrequencyOld != modOscFrequencyOld) {
+  }
+  modOscFrequencyOld = modOscFrequency;
+
 }
 
 void sequencerStepsRead() {
@@ -500,4 +629,10 @@ void capacitiveStateMachine() {
     };
   }
   lastCapacitiveState = capacitiveState;
+}
+
+void setComplexOscillatorFrequency(float frequency) {
+  complexOscBasis.SetFreq(frequency);
+  complexOscBasis.SetSyncFreq(frequency);
+  complexOscSinus.SetFreq(frequency);
 }
