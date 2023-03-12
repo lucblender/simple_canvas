@@ -18,6 +18,8 @@ using namespace daisysp;
 #define DEBUG_PRINTLN(x)
 #endif
 
+
+#define TRIGGER_DIFF 0.01
 #define DEFAULT_VALUE 5  //put a default value that is not possible to be sure all pins are initialized correctly
 
 #define AN_SEQUENCER_STEPANALOGIN A0
@@ -89,6 +91,7 @@ float envelopeGenSig0Decay;
 
 float modOscFrequencyOld = DEFAULT_VALUE;
 float complexOscFrequencyOld = DEFAULT_VALUE;
+float modOscWaveformOld = DEFAULT_VALUE;
 
 // ditial pins value
 uint8_t sequencerStep4 = 0;
@@ -130,10 +133,11 @@ uint8_t envelopeGenSig1LpgVcaOld = DEFAULT_VALUE;
 Adafruit_MCP23X17 mcp;
 
 // ----------------- Seed modules --------------------------------
-static Oscillator osc;
 
 static Oscillator complexOscSinus;
 static VariableShapeOscillator complexOscBasis;
+
+static VariableShapeOscillator modulationOsc;
 
 float frequency = 440;
 float sample_rate;
@@ -281,15 +285,20 @@ void setup() {
   sample_rate = DAISY.get_samplerate();
 
   // init complex oscillators
-  osc.Init(sample_rate);
   complexOscSinus.Init(sample_rate);
-  complexOscSinus.SetWaveform(osc.WAVE_SIN);
+  complexOscSinus.SetWaveform(complexOscSinus.WAVE_SIN);
   complexOscSinus.SetAmp(1);
 
   complexOscBasis.Init(sample_rate);
-
   setComplexOscillatorFrequency(220);
 
+  modulationOsc.Init(sample_rate);
+  setModulationOscillatorFrequency(220);
+
+//read onces all gpios before starting daisy
+  digitalPinsread();
+  mcpPinsRead();
+  analogsRead();
 
   DAISY.begin(ProcessAudio);
 }
@@ -306,13 +315,49 @@ void loop() {
 void ProcessAudio(float **in, float **out, size_t size) {
   for (size_t i = 0; i < size; i++) {
 
-    float complexSinusSample = complexOscSinus.Process();
-    float complexBasisSample = complexOscBasis.Process();
+    float modulationOscSample = modulationOsc.Process();
+    
+    float attenuatedModulationOscSample = modulationOscSample * modOscAttenuator;
+    float attenuatedComplexMixed;
 
-    float complexMixed = (1.0 - complexOscTimbre) * complexSinusSample + complexOscTimbre * complexBasisSample;
+    if (modOscAmFm == 0) {  //0 = AM
 
-    out[0][i] = complexMixed;
-    out[1][i] = complexMixed;
+      // si attenuator = 0 --> signal sans modulation  signal = attenuatedComplexMixed
+      // si attenuator = 1 --> signal modulation max  signal = attenuatedComplexMixed * 100% of (attenuatedModulationOscSample)
+
+      //si attenuator = 0 --> signal
+
+      // modulationOscSample oscillate -1..1
+      // modOscAttenuator 0..1 gain 
+
+      float gain = 1.0f-(((modulationOscSample+1.0f)/2)*modOscAttenuator);
+
+
+      float complexSinusSample = complexOscSinus.Process();
+      float complexBasisSample = complexOscBasis.Process();
+
+      float complexMixed = (1.0 - complexOscTimbre) * complexSinusSample + complexOscTimbre * complexBasisSample;
+      attenuatedComplexMixed = complexMixed * complexOscAttenuator*gain;
+    } else {  // 1 = FM
+
+      // modulationOscSample oscillate -1..1
+      //(modulationOscSample * 0.5f) -0.5 .. 0.5
+      // modOscAttenuator 0..1 gain 
+      // fmFrequencyRamp --> example complexOscFrequency = 400hz --> 400 * 0.1 * ((-0.5..0.5)*0..1)
+
+      float fmFrequencyRamp = complexOscFrequency * 0.1 * ((modulationOscSample * 0.5f)*modOscAttenuator);
+      setComplexOscillatorFrequency(complexOscFrequency + fmFrequencyRamp);
+      float complexSinusSample = complexOscSinus.Process();
+      float complexBasisSample = complexOscBasis.Process();
+
+      float complexMixed = (1.0 - complexOscTimbre) * complexSinusSample + complexOscTimbre * complexBasisSample;
+      attenuatedComplexMixed = complexMixed * complexOscAttenuator;
+    }
+
+
+
+    out[0][i] = attenuatedComplexMixed;
+    out[1][i] = attenuatedComplexMixed;
   }
 }
 
@@ -432,26 +477,44 @@ void mcpPinsRead() {
 void analogsRead() {
   clockRate = simpleAnalogRead(AN_CLOCK_RATE);
   pulserPeriod = simpleAnalogRead(AN_PULSER_PERIOD);
-  modOscFrequency = simpleAnalogReadAndMap(AN_MODOSC_FREQUENCY, 0, 8000);
+  modOscFrequency = modOscFrequency * 0.9 + 0.1 * simpleAnalogReadAndMap(AN_MODOSC_FREQUENCY, 0, 8000);
   modOscWaveform = simpleAnalogRead(AN_MODOSC_WAVEFORM);
   modOscAttenuator = simpleAnalogRead(AN_MODOSC_ATTENUATOR);
   complexOscTimbre = simpleAnalogRead(AN_COMPLEXOSC_TIMBRE);
-  complexOscFrequency = complexOscFrequency*0.9 + 0.1*simpleAnalogReadAndMap(AN_COMPLEXOSC_FREQUENCY, 0, 8000);
+  complexOscFrequency = complexOscFrequency * 0.9 + 0.1 * simpleAnalogReadAndMap(AN_COMPLEXOSC_FREQUENCY, 0, 8000);
   complexOscAttenuator = simpleAnalogRead(AN_COMPLEXOSC_ATTENUATOR);
   envelopeGenSig0Decay = simpleAnalogRead(AN_ENVELOPEGEN_SIG0DECAY);
   envelopeGenSig1Decay = simpleAnalogRead(AN_ENVELOPEGEN_SIG1DECAY);
   envelopeGenSlopeShape = (int)simpleAnalogReadAndMap(AN_ENVELOPEGEN_SLOPESHAPE, 0, 6.5);
 
-  if (abs(complexOscFrequencyOld - complexOscFrequency) > 5) {
+  if (abs(complexOscFrequencyOld - complexOscFrequency) > 1) {  //TODO make this better
     setComplexOscillatorFrequency(complexOscFrequency);
-    Serial.println(abs(complexOscFrequencyOld - complexOscFrequency));
+    complexOscFrequencyOld = complexOscFrequency;
   }
-  complexOscFrequencyOld = complexOscFrequency;
 
-  if (modOscFrequencyOld != modOscFrequencyOld) {
+
+  if (abs(modOscFrequencyOld - modOscFrequency) > 1) {  //TODO make this better
+    setModulationOscillatorFrequency(modOscFrequencyOld);
+    modOscFrequencyOld = modOscFrequency;
   }
-  modOscFrequencyOld = modOscFrequency;
 
+  if (abs(modOscWaveformOld - modOscWaveform) > TRIGGER_DIFF) {
+    if (modOscWaveform < 0.5) {
+      //from tirangle to sawtooth 0 = triangle 0.5 = sawtooth
+      // tirangle shape = 0, pw = 0.5
+      //sawtooth shape =  0, pw 1
+      modulationOsc.SetWaveshape(0.0f);  // 1 = square
+      modulationOsc.SetPW(1.0f - (0.5f - modOscWaveform));
+
+    } else {
+      //from sawtooth to square: 0.5 = sawtooth 1 = square
+      //sawtooth shape =  0, pw 1
+      //square shape = 1, pw = 0.5
+      modulationOsc.SetWaveshape((modOscWaveform - 0.5f) * 2);  // 1 = square
+      modulationOsc.SetPW(1.0f - (modOscWaveform - 0.5f));
+    }
+    modOscWaveformOld = modOscWaveform;
+  }
 }
 
 void sequencerStepsRead() {
@@ -635,4 +698,9 @@ void setComplexOscillatorFrequency(float frequency) {
   complexOscBasis.SetFreq(frequency);
   complexOscBasis.SetSyncFreq(frequency);
   complexOscSinus.SetFreq(frequency);
+}
+
+void setModulationOscillatorFrequency(float frequency) {
+  modulationOsc.SetSyncFreq(frequency);
+  modulationOsc.SetFreq(frequency);
 }
