@@ -92,6 +92,8 @@ float envelopeGenSig0Decay;
 float modOscFrequencyOld = DEFAULT_VALUE;
 float complexOscFrequencyOld = DEFAULT_VALUE;
 float modOscWaveformOld = DEFAULT_VALUE;
+float pulserPeriodOld = DEFAULT_VALUE;
+float clockRateOld = DEFAULT_VALUE;
 
 // ditial pins value
 uint8_t sequencerStep4 = 0;
@@ -105,6 +107,9 @@ uint8_t sequencerStep3Old = DEFAULT_VALUE;
 uint8_t sequencerStep2Old = DEFAULT_VALUE;
 uint8_t sequencerStep1Old = DEFAULT_VALUE;
 uint8_t sequencerStep0Old = DEFAULT_VALUE;
+
+uint8_t sequencerLenght = 5;
+uint8_t sequencerIndex = 0;
 
 // mcp pins value
 uint8_t sequencerTrigger = 0;
@@ -137,6 +142,8 @@ Adafruit_MCP23X17 mcp;
 static Oscillator complexOscSinus;
 static VariableShapeOscillator complexOscBasis;
 
+static VariableShapeOscillator pulserOsc;
+
 static VariableShapeOscillator modulationOsc;
 
 float frequency = 440;
@@ -153,6 +160,16 @@ Adafruit_NeoPixel pixels(NUMPIXELS, DI_LEDS_DIN, NEO_GRB + NEO_KHZ800);
 #define INPUT_TOUCH_COUNT 4
 #define OUTPUT_TOUCH_COUNT 5
 #define TOTAL_TOUCH_COUNT (INPUT_TOUCH_COUNT + OUTPUT_TOUCH_COUNT)
+
+enum TRIGGER_SOURCE { PULSER_TRIGGER = 0,
+                      CLOCK_TRIGGER = 1 };
+
+uint8_t sequencerTriggerSource = PULSER_TRIGGER;
+uint8_t randomVoltageTriggerSource = PULSER_TRIGGER;
+uint8_t pulserTriggerSource = PULSER_TRIGGER;
+uint8_t envelopeGenSig0TriggerSource = PULSER_TRIGGER;
+uint8_t envelopeGenSig1TriggerSource = PULSER_TRIGGER;
+
 
 enum SOURCE_MODULE { NONE_SOURCE = -1,
                      SEQUENCER = 0,
@@ -216,12 +233,52 @@ uint32_t noneColor = pixels.Color(0, 0, 0);
 uint32_t sourceColor[5] = { sequencerColor, pulserColor, randomColor, envelopesColor };
 uint32_t sourceColorHighlighted[5] = { sequencerColorHighlighted, pulserColorHighlighted, randomColorHighlighted, envelopesColorHighlighted };
 
+// ------------------ Timers ------------------------
+HardwareTimer timerClock(TIM1);
+HardwareTimer timerPulser(TIM2);
+float pulserIncrement = 0.0f;
+float pulserValue = 0.0f;
+float randomVoltageValue = 0.0f;
+
+float clockIncrement = 0.0f;
+float clockValue = 0.0f;
+
+
+void OnTimerClockInterrupt() {
+  if (clockValue == 0.0f) {
+    clockValue = 1.0f;
+    if (pulserTriggerSource == CLOCK_TRIGGER)
+      pulserValue = 1.0f;
+    if (randomVoltageTriggerSource == CLOCK_TRIGGER)
+      generateRandomVoltage();
+    if (sequencerTriggerSource == CLOCK_TRIGGER) {
+
+      sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
+      Serial.print("Sequencer index ");
+      Serial.println(sequencerIndex);
+    }
+  } else {
+    clockValue = 0.0f;
+  }
+}
+
+void OnTimerPulserInterrupt() {
+  if (pulserTriggerSource == PULSER_TRIGGER)
+    pulserValue = 1.0f;
+  if (randomVoltageTriggerSource == PULSER_TRIGGER)
+    generateRandomVoltage();
+    if (sequencerTriggerSource == PULSER_TRIGGER) {
+
+      sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
+      Serial.print("Sequencer index ");
+      Serial.println(sequencerIndex);
+    }
+}
+
 void setup() {
   // put your setup code here, to run once:
 
   Serial.begin(115200);
-
-
 
 
   pinMode(DI_PATCH_IRQ, INPUT);
@@ -295,7 +352,13 @@ void setup() {
   modulationOsc.Init(sample_rate);
   setModulationOscillatorFrequency(220);
 
-//read onces all gpios before starting daisy
+  setPulserFrequency(180);
+  timerPulser.attachInterrupt(OnTimerPulserInterrupt);
+
+  setClockFrequency(180);
+  timerClock.attachInterrupt(OnTimerClockInterrupt);
+
+  //read onces all gpios before starting daisy
   digitalPinsread();
   mcpPinsRead();
   analogsRead();
@@ -308,15 +371,15 @@ void loop() {
   digitalPinsread();
   mcpPinsRead();
   analogsRead();
-
-  delay(10);
 }
 
 void ProcessAudio(float **in, float **out, size_t size) {
   for (size_t i = 0; i < size; i++) {
 
+    pulserProcess();
+
     float modulationOscSample = modulationOsc.Process();
-    
+
     float attenuatedModulationOscSample = modulationOscSample * modOscAttenuator;
     float attenuatedComplexMixed;
 
@@ -328,24 +391,24 @@ void ProcessAudio(float **in, float **out, size_t size) {
       //si attenuator = 0 --> signal
 
       // modulationOscSample oscillate -1..1
-      // modOscAttenuator 0..1 gain 
+      // modOscAttenuator 0..1 gain
 
-      float gain = 1.0f-(((modulationOscSample+1.0f)/2)*modOscAttenuator);
+      float gain = 1.0f - (((modulationOscSample + 1.0f) / 2) * modOscAttenuator);
 
 
       float complexSinusSample = complexOscSinus.Process();
       float complexBasisSample = complexOscBasis.Process();
 
       float complexMixed = (1.0 - complexOscTimbre) * complexSinusSample + complexOscTimbre * complexBasisSample;
-      attenuatedComplexMixed = complexMixed * complexOscAttenuator*gain;
+      attenuatedComplexMixed = complexMixed * complexOscAttenuator * gain;
     } else {  // 1 = FM
 
       // modulationOscSample oscillate -1..1
       //(modulationOscSample * 0.5f) -0.5 .. 0.5
-      // modOscAttenuator 0..1 gain 
+      // modOscAttenuator 0..1 gain
       // fmFrequencyRamp --> example complexOscFrequency = 400hz --> 400 * 0.1 * ((-0.5..0.5)*0..1)
 
-      float fmFrequencyRamp = complexOscFrequency * 0.1 * ((modulationOscSample * 0.5f)*modOscAttenuator);
+      float fmFrequencyRamp = complexOscFrequency * 0.2 * ((modulationOscSample)*modOscAttenuator);
       setComplexOscillatorFrequency(complexOscFrequency + fmFrequencyRamp);
       float complexSinusSample = complexOscSinus.Process();
       float complexBasisSample = complexOscBasis.Process();
@@ -356,8 +419,8 @@ void ProcessAudio(float **in, float **out, size_t size) {
 
 
 
-    out[0][i] = attenuatedComplexMixed;
-    out[1][i] = attenuatedComplexMixed;
+    out[0][i] = pulserValue;  //attenuatedComplexMixed;
+    out[1][i] = pulserValue;  //attenuatedComplexMixed;
   }
 }
 
@@ -411,18 +474,65 @@ void mcpPinsRead() {
   if (sequencerTriggerOld != sequencerTrigger) {  // 0 clock, 1 pulser
     Serial.print("sequencerTrigger ");
     Serial.println(sequencerTrigger);
+    if (sequencerTrigger == 0)
+      sequencerTriggerSource = CLOCK_TRIGGER;
+    else
+      sequencerTriggerSource = PULSER_TRIGGER;
+
+    if (pulserTriggerSelect == 1)
+      pulserTriggerSource = sequencerTriggerSource;
+    if (randomTriggerSelect == 1)
+      randomVoltageTriggerSource = sequencerTriggerSource;
+    if (envelopeGenSig0Selector == 1)
+      envelopeGenSig0TriggerSource = sequencerTriggerSource;
+    if (envelopeGenSig1Selector == 1)
+      envelopeGenSig1TriggerSource = sequencerTriggerSource;
   }
   if (sequencerStageOld != sequencerStage) {  // 2 = 3steps, 3 = 4steps, 1 = 5steps
     Serial.print("sequencerStage ");
     Serial.println(sequencerStage);
+    switch (sequencerStage) {
+      case 2:
+        sequencerLenght = 3;
+        break;
+      case 3:
+        sequencerLenght = 4;
+        break;
+      case 1:
+        sequencerLenght = 5;
+        break;
+    }
   }
   if (randomTriggerSelectOld != randomTriggerSelect) {  //2 = pulser, 3 = clock, 1 = sequencer
     Serial.print("randomTriggerSelect ");
     Serial.println(randomTriggerSelect);
+    switch (randomTriggerSelect) {
+      case 2:
+        randomVoltageTriggerSource = PULSER_TRIGGER;
+        break;
+      case 3:
+        randomVoltageTriggerSource = CLOCK_TRIGGER;
+        break;
+      case 1:
+        randomVoltageTriggerSource = sequencerTriggerSource;
+        break;
+    }
   }
+
   if (pulserTriggerSelectOld != pulserTriggerSelect) {  //2 = pulser, 3 = clock, 1 = sequencer
     Serial.print("pulserTriggerSelect ");
     Serial.println(pulserTriggerSelect);
+    switch (pulserTriggerSelect) {
+      case 2:
+        pulserTriggerSource = PULSER_TRIGGER;
+        break;
+      case 3:
+        pulserTriggerSource = CLOCK_TRIGGER;
+        break;
+      case 1:
+        pulserTriggerSource = sequencerTriggerSource;
+        break;
+    }
   }
   if (modOscAmFmOld != modOscAmFm) {  //0 = AM, 1 = FM
     Serial.print("modOscAmFm ");
@@ -448,14 +558,40 @@ void mcpPinsRead() {
   if (envelopeGenSig0SelectorOld != envelopeGenSig0Selector) {  // 2 = pulser, 3 = clock, 1 = sequencer
     Serial.print("envelopeGenSig0Selector ");
     Serial.println(envelopeGenSig0Selector);
+    switch (envelopeGenSig0Selector) {
+      case 2:
+        envelopeGenSig0TriggerSource = PULSER_TRIGGER;
+        break;
+      case 3:
+        envelopeGenSig0TriggerSource = CLOCK_TRIGGER;
+        break;
+      case 1:
+        envelopeGenSig0TriggerSource = sequencerTriggerSource;
+        break;
+    }
   }
   if (envelopeGenSig0LpgVcaOld != envelopeGenSig0LpgVca) {  // 0 = LPG, 1 = VCA
     Serial.print("envelopeGenSig0LpgVca ");
     Serial.println(envelopeGenSig0LpgVca);
+    if (envelopeGenSig0LpgVca == 0)
+      setPulserFrequency(180);
+    else
+      setPulserFrequency(50);
   }
   if (envelopeGenSig1SelectorOld != envelopeGenSig1Selector) {  // 2 = pulser, 3 = clock, 1 = sequencer
     Serial.print("envelopeGenSig1Selector ");
     Serial.println(envelopeGenSig1Selector);
+    switch (envelopeGenSig1Selector) {
+      case 2:
+        envelopeGenSig1TriggerSource = PULSER_TRIGGER;
+        break;
+      case 3:
+        envelopeGenSig1TriggerSource = CLOCK_TRIGGER;
+        break;
+      case 1:
+        envelopeGenSig1TriggerSource = sequencerTriggerSource;
+        break;
+    }
   }
   if (envelopeGenSig1LpgVcaOld != envelopeGenSig1LpgVca) {  // 0 = LPG, 1 = VCA
     Serial.print("envelopeGenSig1LpgVca ");
@@ -475,8 +611,8 @@ void mcpPinsRead() {
 }
 
 void analogsRead() {
-  clockRate = simpleAnalogRead(AN_CLOCK_RATE);
-  pulserPeriod = simpleAnalogRead(AN_PULSER_PERIOD);
+  clockRate = simpleAnalogReadAndMap(AN_CLOCK_RATE, 0, 180);
+  pulserPeriod = simpleAnalogReadAndMap(AN_PULSER_PERIOD, 0, 180);
   modOscFrequency = modOscFrequency * 0.9 + 0.1 * simpleAnalogReadAndMap(AN_MODOSC_FREQUENCY, 0, 8000);
   modOscWaveform = simpleAnalogRead(AN_MODOSC_WAVEFORM);
   modOscAttenuator = simpleAnalogRead(AN_MODOSC_ATTENUATOR);
@@ -492,6 +628,14 @@ void analogsRead() {
     complexOscFrequencyOld = complexOscFrequency;
   }
 
+  if (abs(pulserPeriodOld - pulserPeriod) > 1) {
+    setPulserFrequency(pulserPeriod);
+    pulserPeriodOld = pulserPeriod;
+  }
+  if (abs(clockRateOld - clockRate) > 1) {
+    setClockFrequency(clockRate);
+    clockRateOld = clockRate;
+  }
 
   if (abs(modOscFrequencyOld - modOscFrequency) > 1) {  //TODO make this better
     setModulationOscillatorFrequency(modOscFrequencyOld);
@@ -703,4 +847,37 @@ void setComplexOscillatorFrequency(float frequency) {
 void setModulationOscillatorFrequency(float frequency) {
   modulationOsc.SetSyncFreq(frequency);
   modulationOsc.SetFreq(frequency);
+}
+
+void setPulserFrequency(float frequency) {
+
+  timerPulser.setPrescaleFactor(2000);               // = Set prescaler to 4800 => timer frequency = 200MHz / 4800  = 100'000 Hz
+  timerPulser.setOverflow(int(100000 / frequency));  // Set overflow to 50000 => timer frequency = 100'000 Hz / 555 = ~180 Hz
+  timerPulser.refresh();                             // Make register changes take effect
+  timerPulser.resume();                              // Start
+  pulserIncrement = frequency / sample_rate;
+}
+
+void setClockFrequency(float frequency) {
+
+  //frequency *2 to make a 50% duty cycle square signal
+
+  timerClock.setPrescaleFactor(2000);                     // = Set prescaler to 4800 => timer frequency = 200MHz / 4800  = 100'000 Hz
+  timerClock.setOverflow(int(100000 / (frequency * 2)));  // Set overflow to 50000 => timer frequency = 100'000 Hz / 555 = ~180 Hz
+  timerClock.refresh();                                   // Make register changes take effect
+  timerClock.resume();                                    // Start
+  clockIncrement = frequency / sample_rate;
+}
+
+void pulserProcess() {
+  if (pulserTriggerSource == CLOCK_TRIGGER)
+    pulserValue -= clockIncrement;
+  else if (pulserTriggerSource == PULSER_TRIGGER)
+    pulserValue -= pulserIncrement;
+  if (pulserValue < 0.0f)
+    pulserValue = 0.0f;
+}
+
+void generateRandomVoltage() {
+  randomVoltageValue = random(0, 1000) / 1000.0f;
 }
