@@ -110,6 +110,7 @@ uint8_t sequencerStep0Old = DEFAULT_VALUE;
 
 uint8_t sequencerLenght = 5;
 uint8_t sequencerIndex = 0;
+float sequencerValue = 0;
 
 // mcp pins value
 uint8_t sequencerTrigger = 0;
@@ -252,10 +253,8 @@ void OnTimerClockInterrupt() {
     if (randomVoltageTriggerSource == CLOCK_TRIGGER)
       generateRandomVoltage();
     if (sequencerTriggerSource == CLOCK_TRIGGER) {
-
+      sequencerCurrentStepRead();
       sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
-      Serial.print("Sequencer index ");
-      Serial.println(sequencerIndex);
     }
   } else {
     clockValue = 0.0f;
@@ -267,12 +266,10 @@ void OnTimerPulserInterrupt() {
     pulserValue = 1.0f;
   if (randomVoltageTriggerSource == PULSER_TRIGGER)
     generateRandomVoltage();
-    if (sequencerTriggerSource == PULSER_TRIGGER) {
-
-      sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
-      Serial.print("Sequencer index ");
-      Serial.println(sequencerIndex);
-    }
+  if (sequencerTriggerSource == PULSER_TRIGGER) {
+    sequencerCurrentStepRead();
+    sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
+  }
 }
 
 void setup() {
@@ -285,8 +282,7 @@ void setup() {
 
   for (int i = 0; i < 5; i++) {
 
-    pinMode(DI_SEQUENCER_STEPSELECT[i], OUTPUT);
-    digitalWrite(DI_SEQUENCER_STEPSELECT[i], 0);
+    pinMode(DI_SEQUENCER_STEPSELECT[i], INPUT);
   }
 
   if (!cap.begin(0x5A)) {
@@ -352,10 +348,10 @@ void setup() {
   modulationOsc.Init(sample_rate);
   setModulationOscillatorFrequency(220);
 
-  setPulserFrequency(180);
+  setPulserFrequency(3);
   timerPulser.attachInterrupt(OnTimerPulserInterrupt);
 
-  setClockFrequency(180);
+  setClockFrequency(3);
   timerClock.attachInterrupt(OnTimerClockInterrupt);
 
   //read onces all gpios before starting daisy
@@ -573,10 +569,6 @@ void mcpPinsRead() {
   if (envelopeGenSig0LpgVcaOld != envelopeGenSig0LpgVca) {  // 0 = LPG, 1 = VCA
     Serial.print("envelopeGenSig0LpgVca ");
     Serial.println(envelopeGenSig0LpgVca);
-    if (envelopeGenSig0LpgVca == 0)
-      setPulserFrequency(180);
-    else
-      setPulserFrequency(50);
   }
   if (envelopeGenSig1SelectorOld != envelopeGenSig1Selector) {  // 2 = pulser, 3 = clock, 1 = sequencer
     Serial.print("envelopeGenSig1Selector ");
@@ -611,8 +603,8 @@ void mcpPinsRead() {
 }
 
 void analogsRead() {
-  clockRate = simpleAnalogReadAndMap(AN_CLOCK_RATE, 0, 180);
-  pulserPeriod = simpleAnalogReadAndMap(AN_PULSER_PERIOD, 0, 180);
+  clockRate = simpleAnalogReadAndMap(AN_CLOCK_RATE, 0, 3); //0..3Hz = 0..180 bpm
+  pulserPeriod = simpleAnalogReadAndMap(AN_PULSER_PERIOD, 0, 4); //0..4Hz = 0..240 bpm
   modOscFrequency = modOscFrequency * 0.9 + 0.1 * simpleAnalogReadAndMap(AN_MODOSC_FREQUENCY, 0, 8000);
   modOscWaveform = simpleAnalogRead(AN_MODOSC_WAVEFORM);
   modOscAttenuator = simpleAnalogRead(AN_MODOSC_ATTENUATOR);
@@ -628,11 +620,11 @@ void analogsRead() {
     complexOscFrequencyOld = complexOscFrequency;
   }
 
-  if (abs(pulserPeriodOld - pulserPeriod) > 1) {
+  if (abs(pulserPeriodOld - pulserPeriod) > TRIGGER_DIFF) {
     setPulserFrequency(pulserPeriod);
     pulserPeriodOld = pulserPeriod;
   }
-  if (abs(clockRateOld - clockRate) > 1) {
+  if (abs(clockRateOld - clockRate) > TRIGGER_DIFF) {
     setClockFrequency(clockRate);
     clockRateOld = clockRate;
   }
@@ -661,7 +653,11 @@ void analogsRead() {
   }
 }
 
-void sequencerStepsRead() {
+void sequencerCurrentStepRead() {
+  uint8_t nextSequencerIndex = (sequencerIndex + 1) % sequencerLenght;
+  ;
+
+  sequencerValue = analogRead(AN_SEQUENCER_STEPANALOGIN); //analog value goes from ~27 to ~920 because of 0.7V loss of the diod
 
   //start with all pins to 0
   for (int i = 0; i < 5; i++) {
@@ -669,24 +665,14 @@ void sequencerStepsRead() {
     pinMode(DI_SEQUENCER_STEPSELECT[i], INPUT);
   }
 
+  //Prepare for next sequential voltage source
+  pinMode(DI_SEQUENCER_STEPSELECT[nextSequencerIndex], OUTPUT);
+  digitalWrite(DI_SEQUENCER_STEPSELECT[nextSequencerIndex], 1);
 
-  for (int indexRead = 0; indexRead < 5; indexRead++) {
-    for (int i = 0; i < 5; i++) {
-      pinMode(DI_SEQUENCER_STEPSELECT[i], INPUT);
-    }
-
-    delay(10);
-
-    pinMode(DI_SEQUENCER_STEPSELECT[indexRead], OUTPUT);
-    digitalWrite(DI_SEQUENCER_STEPSELECT[indexRead], 1);
-    sequencerStepAnalogIn[indexRead] = analogRead(AN_SEQUENCER_STEPANALOGIN);
-    Serial.print("Read step ");
-    Serial.print(indexRead);
-    Serial.print(" : ");
-    Serial.print(sequencerStepAnalogIn[indexRead]);
-    Serial.print(" ");
-  }
-  Serial.println();
+  DEBUG_PRINT("Read step ");
+  DEBUG_PRINT(sequencerIndex);
+  DEBUG_PRINT(" : ");
+  DEBUG_PRINTLN(sequencerValue);
 }
 
 float semitone_to_hertz(int8_t note_number) {
@@ -851,8 +837,8 @@ void setModulationOscillatorFrequency(float frequency) {
 
 void setPulserFrequency(float frequency) {
 
-  timerPulser.setPrescaleFactor(2000);               // = Set prescaler to 4800 => timer frequency = 200MHz / 4800  = 100'000 Hz
-  timerPulser.setOverflow(int(100000 / frequency));  // Set overflow to 50000 => timer frequency = 100'000 Hz / 555 = ~180 Hz
+  timerPulser.setPrescaleFactor(20000);               // = Set prescaler to 4800 => timer frequency = 200MHz / 20000  = 10'000 Hz
+  timerPulser.setOverflow(int(10000 / frequency));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency 
   timerPulser.refresh();                             // Make register changes take effect
   timerPulser.resume();                              // Start
   pulserIncrement = frequency / sample_rate;
@@ -862,8 +848,8 @@ void setClockFrequency(float frequency) {
 
   //frequency *2 to make a 50% duty cycle square signal
 
-  timerClock.setPrescaleFactor(2000);                     // = Set prescaler to 4800 => timer frequency = 200MHz / 4800  = 100'000 Hz
-  timerClock.setOverflow(int(100000 / (frequency * 2)));  // Set overflow to 50000 => timer frequency = 100'000 Hz / 555 = ~180 Hz
+  timerClock.setPrescaleFactor(20000);                     // = Set prescaler to 4800 => timer frequency = 200MHz / 20000  = 10'000 Hz
+  timerClock.setOverflow(int(10000 / (frequency * 2)));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency 
   timerClock.refresh();                                   // Make register changes take effect
   timerClock.resume();                                    // Start
   clockIncrement = frequency / sample_rate;
@@ -880,4 +866,6 @@ void pulserProcess() {
 
 void generateRandomVoltage() {
   randomVoltageValue = random(0, 1000) / 1000.0f;
+  DEBUG_PRINT("random Voltage value ");
+  DEBUG_PRINTLN(randomVoltageValue);
 }
