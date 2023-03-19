@@ -15,6 +15,7 @@ enum ADSR_STATUS {
   MULTISHAPE_ADSR_SEG_IDLE = 0,
   MULTISHAPE_ADSR_SEG_ATTACK = 1,
   MULTISHAPE_ADSR_SEG_DECAY = 2,
+  MULTISHAPE_ADSR_SEG_SUSTAIN = 3,
   MULTISHAPE_ADSR_SEG_RELEASE = 4
 };
 
@@ -25,13 +26,19 @@ public:
   void Init(float sample_rate);
   float Process(bool gate);
   void setAttackShape(uint8_t shape);
+  void setDecayShape(uint8_t shape);
   void setReleaseShape(uint8_t shape);
   void retrigger();
 
   void setAttackTime(float timeInS);
   void setDecayTime(float timeInS);
   void setReleaseTime(float timeInS);
+  void setSustainLevel(float sustainValue);
 private:
+  float currentOutput = 0.0f;
+  uint8_t currentStatus = MULTISHAPE_ADSR_SEG_IDLE;
+  uint32_t indexTimer = 0;
+
   float sampleRate;
   float sampleTime;
 
@@ -64,7 +71,5 @@ private:
   float interpolateFallingSlope(uint8_t slopeShape, uint32_t indexTimer, uint32_t nSample, float range, float endFall);
 };
 
-float squareFloat(float x) {
-  return x * x;
-}
+float squareFloat(float x);
 #endif  // MULTI_SHAPE_ADSR_H
