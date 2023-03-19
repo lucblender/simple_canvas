@@ -7,6 +7,8 @@ using namespace daisysp;
 
 #include <Adafruit_NeoPixel.h>
 
+#include "MultiShapeAdsr.h"
+
 #define DEBUG
 #ifdef DEBUG
 #define DEBUG_PRINT(x) Serial.print(x)
@@ -20,7 +22,8 @@ using namespace daisysp;
 
 
 #define TRIGGER_DIFF 0.01
-#define DEFAULT_VALUE 5  //put a default value that is not possible to be sure all pins are initialized correctly
+#define DEFAULT_VALUE 5          //put a default value that is not possible to be sure all pins are initialized correctly
+#define DEFAULT_SIGNED_VALUE -1  //put a default value that is not possible to be sure all pins are initialized correctly
 
 #define AN_SEQUENCER_STEPANALOGIN A0
 #define AN_CLOCK_RATE A1
@@ -94,6 +97,18 @@ float complexOscFrequencyOld = DEFAULT_VALUE;
 float modOscWaveformOld = DEFAULT_VALUE;
 float pulserPeriodOld = DEFAULT_VALUE;
 float clockRateOld = DEFAULT_VALUE;
+int envelopeGenSlopeShapeOld = DEFAULT_SIGNED_VALUE;
+float envelopeGenSig0DecayOld = DEFAULT_VALUE;
+float envelopeGenSig1DecayOld = DEFAULT_VALUE;
+
+float envelopeGenSig0DecayFactor = DEFAULT_VALUE;
+float envelopeGenSig1DecayFactor = DEFAULT_VALUE;
+
+float envelopeGenSig0Volume = DEFAULT_VALUE;
+float envelopeGenSig1Volume = DEFAULT_VALUE;
+
+bool envelope0Enable = true;
+bool envelope1Enable = true;
 
 // ditial pins value
 uint8_t sequencerStep4 = 0;
@@ -147,8 +162,16 @@ static VariableShapeOscillator pulserOsc;
 
 static VariableShapeOscillator modulationOsc;
 
+static MoogLadder lowPassGateFilter0;  // yes moogladder in a buchla inspired synth, what you gonna do
+static MoogLadder lowPassGateFilter1;
+
 float frequency = 440;
 float sample_rate;
+
+// ---------------------- Custom modules ------------------------
+
+MultiShapeAdsr multiShapeAdsr0;
+MultiShapeAdsr multiShapeAdsr1;
 
 // ----------------- Neopixels -----------------------------------
 
@@ -256,6 +279,12 @@ void OnTimerClockInterrupt() {
       sequencerCurrentStepRead();
       sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
     }
+    if (envelopeGenSig0TriggerSource == CLOCK_TRIGGER) {
+      multiShapeAdsr0.retrigger();
+    }
+    if (envelopeGenSig1TriggerSource == CLOCK_TRIGGER) {
+      multiShapeAdsr1.retrigger();
+    }
   } else {
     clockValue = 0.0f;
   }
@@ -269,6 +298,11 @@ void OnTimerPulserInterrupt() {
   if (sequencerTriggerSource == PULSER_TRIGGER) {
     sequencerCurrentStepRead();
     sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
+  }
+  if (envelopeGenSig0TriggerSource == PULSER_TRIGGER)
+    multiShapeAdsr0.retrigger();
+  if (envelopeGenSig1TriggerSource == PULSER_TRIGGER) {
+    multiShapeAdsr1.retrigger();
   }
 }
 
@@ -354,6 +388,32 @@ void setup() {
   setClockFrequency(3);
   timerClock.attachInterrupt(OnTimerClockInterrupt);
 
+  // init adsr
+  multiShapeAdsr0.Init(sample_rate);
+  multiShapeAdsr0.setSustainLevel(.7);
+  multiShapeAdsr0.setAttackTime(0.1);
+  multiShapeAdsr0.setReleaseTime(0.1);
+  multiShapeAdsr0.setDecayTime(0.1);
+  multiShapeAdsr0.setAttackShape(LINEAR_SHAPE);
+  multiShapeAdsr0.setDecayShape(LINEAR_SHAPE);
+  multiShapeAdsr0.setReleaseShape(LINEAR_SHAPE);
+
+  multiShapeAdsr1.Init(sample_rate);
+  multiShapeAdsr1.setSustainLevel(.7);
+  multiShapeAdsr1.setAttackTime(0.1);
+  multiShapeAdsr1.setReleaseTime(0.1);
+  multiShapeAdsr1.setDecayTime(0.1);
+  multiShapeAdsr1.setAttackShape(LINEAR_SHAPE);
+  multiShapeAdsr1.setDecayShape(LINEAR_SHAPE);
+  multiShapeAdsr1.setReleaseShape(LINEAR_SHAPE);
+
+  // init lpg
+  lowPassGateFilter0.Init(sample_rate);
+  lowPassGateFilter0.SetFreq(sample_rate);
+  lowPassGateFilter1.Init(sample_rate);
+  lowPassGateFilter1.SetFreq(sample_rate);
+
+
   //read onces all gpios before starting daisy
   digitalPinsread();
   mcpPinsRead();
@@ -369,10 +429,18 @@ void loop() {
   analogsRead();
 }
 
+
 void ProcessAudio(float **in, float **out, size_t size) {
   for (size_t i = 0; i < size; i++) {
 
     pulserProcess();
+
+    float adsr0Value = multiShapeAdsr0.Process(false);  // for now there is no gate so we will only have adr
+    float adsr1Value = multiShapeAdsr1.Process(false);  // for now there is no gate so we will only have adr
+
+
+    lowPassGateFilter0.SetFreq((sample_rate/2) * (adsr0Value*adsr0Value));
+    lowPassGateFilter1.SetFreq((sample_rate/2)* (adsr1Value*adsr1Value));
 
     float modulationOscSample = modulationOsc.Process();
 
@@ -410,13 +478,52 @@ void ProcessAudio(float **in, float **out, size_t size) {
       float complexBasisSample = complexOscBasis.Process();
 
       float complexMixed = (1.0 - complexOscTimbre) * complexSinusSample + complexOscTimbre * complexBasisSample;
+
       attenuatedComplexMixed = complexMixed * complexOscAttenuator;
+    }
+
+    //apply filter even if not used to keep it up to date
+    float lpgComplexMixed = lowPassGateFilter0.Process(attenuatedComplexMixed*2.0f);
+    //TODO apply envelopeGenSig0DecayFactor
+    if (envelope0Enable) {
+
+      if (envelopeGenSig0LpgVca == 0)  //LPG
+      {
+        attenuatedComplexMixed = lpgComplexMixed;
+      } else  //VCA
+      {
+        attenuatedComplexMixed = attenuatedComplexMixed * adsr0Value;
+      }
+    }
+    attenuatedComplexMixed = attenuatedComplexMixed * envelopeGenSig0Volume;
+
+
+    float lpgModulationMixed = lowPassGateFilter1.Process(modulationOscSample*2.0f);
+    // add modulation osc
+    if (envelopeGenSig1Volume > 0.02f) {
+      if (envelope1Enable) {
+        if (envelopeGenSig1LpgVca == 0)  //LPG
+        {
+          attenuatedComplexMixed = attenuatedComplexMixed + lpgModulationMixed * envelopeGenSig1Volume;
+        } else  //VCA
+        {
+          attenuatedComplexMixed = attenuatedComplexMixed + (modulationOscSample * envelopeGenSig1Volume * adsr1Value);
+        }
+
+      } else
+        attenuatedComplexMixed = attenuatedComplexMixed + (modulationOscSample * envelopeGenSig1Volume);
     }
 
 
 
-    out[0][i] = pulserValue;  //attenuatedComplexMixed;
-    out[1][i] = pulserValue;  //attenuatedComplexMixed;
+
+
+
+
+
+
+    out[0][i] = attenuatedComplexMixed;
+    out[1][i] = attenuatedComplexMixed;
   }
 }
 
@@ -603,8 +710,8 @@ void mcpPinsRead() {
 }
 
 void analogsRead() {
-  clockRate = simpleAnalogReadAndMap(AN_CLOCK_RATE, 0, 3); //0..3Hz = 0..180 bpm
-  pulserPeriod = simpleAnalogReadAndMap(AN_PULSER_PERIOD, 0, 4); //0..4Hz = 0..240 bpm
+  clockRate = simpleAnalogReadAndMap(AN_CLOCK_RATE, 0, 3);        //0..3Hz = 0..180 bpm
+  pulserPeriod = simpleAnalogReadAndMap(AN_PULSER_PERIOD, 0, 4);  //0..4Hz = 0..240 bpm
   modOscFrequency = modOscFrequency * 0.9 + 0.1 * simpleAnalogReadAndMap(AN_MODOSC_FREQUENCY, 0, 8000);
   modOscWaveform = simpleAnalogRead(AN_MODOSC_WAVEFORM);
   modOscAttenuator = simpleAnalogRead(AN_MODOSC_ATTENUATOR);
@@ -651,13 +758,154 @@ void analogsRead() {
     }
     modOscWaveformOld = modOscWaveform;
   }
+
+
+
+  if (abs(envelopeGenSig0DecayOld - envelopeGenSig0Decay) > TRIGGER_DIFF) {
+    if (envelopeGenSig0Decay < 0.5f) {
+
+      envelopeGenSig0Volume = 1.0f;
+      // start to play with envelope, volume is 100%
+      // if envelopeGenSig0Decay is at its minimum, disable envelope
+      if (envelopeGenSig0Decay < 0.05f) {
+        if (envelope0Enable == true) {
+          envelope0Enable = false;
+          Serial.println("Disable envelope 0");
+        }
+      } else {
+        envelopeGenSig0DecayFactor = envelopeGenSig0Decay * 2.0f;
+        if (envelope0Enable == false) {
+          envelope0Enable = true;
+          Serial.println("Enable envelope 0");
+        }
+      }
+    } else {
+      // mean decay is at its max, start to play with volume
+      envelopeGenSig0DecayFactor = 1.0f;
+      // envelopeGenSig0Decay from 0.5 to 1
+      // envelopeGenSig0Volume from 1 to 0
+      envelopeGenSig0Volume = 2.0f * (1.0f - envelopeGenSig0Decay);
+    }
+    envelopeGenSig0DecayOld = envelopeGenSig0Decay;
+  }
+
+  if (abs(envelopeGenSig1DecayOld - envelopeGenSig1Decay) > TRIGGER_DIFF) {
+    if (envelopeGenSig1Decay < 0.5f) {
+
+      envelopeGenSig1Volume = 1.0f;
+      // start to play with envelope, volume is 100%
+      // if envelopeGenSig1Decay is at its minimum, disable envelope
+      if (envelopeGenSig1Decay < 0.05f) {
+        if (envelope1Enable == true) {
+          envelope1Enable = false;
+          Serial.println("Disable envelope 1");
+        }
+      } else {
+        envelopeGenSig1DecayFactor = envelopeGenSig1Decay * 2.0f;
+        if (envelope1Enable == false) {
+          envelope1Enable = true;
+          Serial.println("Enable envelope 1");
+        }
+      }
+    } else {
+      // mean decay is at its max, start to play with volume
+      envelopeGenSig1DecayFactor = 1.0f;
+      // envelopeGenSig1Decay from 0.5 to 1
+      // envelopeGenSig1Volume from 1 to 0
+      envelopeGenSig1Volume = 2.0f * (1.0f - envelopeGenSig1Decay);
+    }
+    envelopeGenSig1DecayOld = envelopeGenSig1Decay;
+  }
+
+  if (envelopeGenSlopeShape != envelopeGenSlopeShapeOld) {
+    switch (envelopeGenSlopeShape) {
+      case 0:
+        {
+          multiShapeAdsr0.setAttackShape(QUADRATIC_SHAPE);
+          multiShapeAdsr0.setDecayShape(QUADRATIC_INVERT_SHAPE);
+          multiShapeAdsr0.setReleaseShape(QUADRATIC_INVERT_SHAPE);
+
+          multiShapeAdsr1.setAttackShape(QUADRATIC_SHAPE);
+          multiShapeAdsr1.setDecayShape(QUADRATIC_INVERT_SHAPE);
+          multiShapeAdsr1.setReleaseShape(QUADRATIC_INVERT_SHAPE);
+          break;
+        }
+      case 1:
+        {
+          multiShapeAdsr0.setAttackShape(QUADRATIC_SHAPE);
+          multiShapeAdsr0.setDecayShape(QUADRATIC_SHAPE);
+          multiShapeAdsr0.setReleaseShape(QUADRATIC_SHAPE);
+
+          multiShapeAdsr1.setAttackShape(QUADRATIC_SHAPE);
+          multiShapeAdsr1.setDecayShape(QUADRATIC_SHAPE);
+          multiShapeAdsr1.setReleaseShape(QUADRATIC_SHAPE);
+          break;
+        }
+      case 2:
+        {
+          multiShapeAdsr0.setAttackShape(QUADRATIC_INVERT_SHAPE);
+          multiShapeAdsr0.setDecayShape(QUADRATIC_INVERT_SHAPE);
+          multiShapeAdsr0.setReleaseShape(QUADRATIC_INVERT_SHAPE);
+
+          multiShapeAdsr1.setAttackShape(QUADRATIC_INVERT_SHAPE);
+          multiShapeAdsr1.setDecayShape(QUADRATIC_INVERT_SHAPE);
+          multiShapeAdsr1.setReleaseShape(QUADRATIC_INVERT_SHAPE);
+          break;
+        }
+      case 3:
+        {
+          multiShapeAdsr0.setAttackShape(LINEAR_SHAPE);
+          multiShapeAdsr0.setDecayShape(LINEAR_SHAPE);
+          multiShapeAdsr0.setReleaseShape(LINEAR_SHAPE);
+
+          multiShapeAdsr1.setAttackShape(LINEAR_SHAPE);
+          multiShapeAdsr1.setDecayShape(LINEAR_SHAPE);
+          multiShapeAdsr1.setReleaseShape(LINEAR_SHAPE);
+          break;
+        }
+      case 4:
+        {
+          multiShapeAdsr0.setAttackShape(LOGISTIC_SHAPE);
+          multiShapeAdsr0.setDecayShape(LOGISTIC_SHAPE);
+          multiShapeAdsr0.setReleaseShape(LOGISTIC_SHAPE);
+
+          multiShapeAdsr1.setAttackShape(LOGISTIC_SHAPE);
+          multiShapeAdsr1.setDecayShape(LOGISTIC_SHAPE);
+          multiShapeAdsr1.setReleaseShape(LOGISTIC_SHAPE);
+          break;
+        }
+      case 5:
+        {
+          multiShapeAdsr0.setAttackShape(QUADRATIC_INVERT_SHAPE);
+          multiShapeAdsr0.setDecayShape(QUADRATIC_INVERT_SHAPE);
+          multiShapeAdsr0.setReleaseShape(QUADRATIC_INVERT_SHAPE);
+
+          multiShapeAdsr1.setAttackShape(QUADRATIC_INVERT_SHAPE);
+          multiShapeAdsr1.setDecayShape(QUADRATIC_INVERT_SHAPE);
+          multiShapeAdsr1.setReleaseShape(QUADRATIC_INVERT_SHAPE);
+          break;
+        }
+      case 6:
+        {
+          multiShapeAdsr0.setAttackShape(QUADRATIC_INVERT_SHAPE);
+          multiShapeAdsr0.setDecayShape(QUADRATIC_SHAPE);
+          multiShapeAdsr0.setReleaseShape(QUADRATIC_SHAPE);
+
+          multiShapeAdsr1.setAttackShape(QUADRATIC_INVERT_SHAPE);
+          multiShapeAdsr1.setDecayShape(QUADRATIC_SHAPE);
+          multiShapeAdsr1.setReleaseShape(QUADRATIC_SHAPE);
+          break;
+        }
+    }
+    envelopeGenSlopeShapeOld = envelopeGenSlopeShape;
+  }
 }
 
 void sequencerCurrentStepRead() {
   uint8_t nextSequencerIndex = (sequencerIndex + 1) % sequencerLenght;
   ;
 
-  sequencerValue = analogRead(AN_SEQUENCER_STEPANALOGIN); //analog value goes from ~27 to ~920 because of 0.7V loss of the diod
+  sequencerValue = analogRead(AN_SEQUENCER_STEPANALOGIN);  //analog value goes from ~27 to ~920 because of 0.7V loss of the diod
 
   //start with all pins to 0
   for (int i = 0; i < 5; i++) {
@@ -668,11 +916,12 @@ void sequencerCurrentStepRead() {
   //Prepare for next sequential voltage source
   pinMode(DI_SEQUENCER_STEPSELECT[nextSequencerIndex], OUTPUT);
   digitalWrite(DI_SEQUENCER_STEPSELECT[nextSequencerIndex], 1);
-
+  /*
   DEBUG_PRINT("Read step ");
   DEBUG_PRINT(sequencerIndex);
   DEBUG_PRINT(" : ");
   DEBUG_PRINTLN(sequencerValue);
+  */
 }
 
 float semitone_to_hertz(int8_t note_number) {
@@ -837,10 +1086,10 @@ void setModulationOscillatorFrequency(float frequency) {
 
 void setPulserFrequency(float frequency) {
 
-  timerPulser.setPrescaleFactor(20000);               // = Set prescaler to 4800 => timer frequency = 200MHz / 20000  = 10'000 Hz
-  timerPulser.setOverflow(int(10000 / frequency));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency 
-  timerPulser.refresh();                             // Make register changes take effect
-  timerPulser.resume();                              // Start
+  timerPulser.setPrescaleFactor(20000);             // = Set prescaler to 4800 => timer frequency = 200MHz / 20000  = 10'000 Hz
+  timerPulser.setOverflow(int(10000 / frequency));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency
+  timerPulser.refresh();                            // Make register changes take effect
+  timerPulser.resume();                             // Start
   pulserIncrement = frequency / sample_rate;
 }
 
@@ -848,10 +1097,10 @@ void setClockFrequency(float frequency) {
 
   //frequency *2 to make a 50% duty cycle square signal
 
-  timerClock.setPrescaleFactor(20000);                     // = Set prescaler to 4800 => timer frequency = 200MHz / 20000  = 10'000 Hz
-  timerClock.setOverflow(int(10000 / (frequency * 2)));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency 
-  timerClock.refresh();                                   // Make register changes take effect
-  timerClock.resume();                                    // Start
+  timerClock.setPrescaleFactor(20000);                   // = Set prescaler to 4800 => timer frequency = 200MHz / 20000  = 10'000 Hz
+  timerClock.setOverflow(int(10000 / (frequency * 2)));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency
+  timerClock.refresh();                                  // Make register changes take effect
+  timerClock.resume();                                   // Start
   clockIncrement = frequency / sample_rate;
 }
 
@@ -866,6 +1115,6 @@ void pulserProcess() {
 
 void generateRandomVoltage() {
   randomVoltageValue = random(0, 1000) / 1000.0f;
-  DEBUG_PRINT("random Voltage value ");
-  DEBUG_PRINTLN(randomVoltageValue);
+  /*DEBUG_PRINT("random Voltage value ");
+  DEBUG_PRINTLN(randomVoltageValue);*/
 }

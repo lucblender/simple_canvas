@@ -62,6 +62,8 @@ float MultiShapeAdsr::Process(bool gate) {
 
   if (this->currentOutput < 0.0f)
     this->currentOutput = 0.0f;
+  if (this->currentOutput > 1.0f)
+    this->currentOutput = 1.0f;
 
   return this->currentOutput;
 }
