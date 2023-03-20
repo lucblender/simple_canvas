@@ -8,6 +8,7 @@ using namespace daisysp;
 #include <Adafruit_NeoPixel.h>
 
 #include "MultiShapeAdsr.h"
+#include "AveragedAnalog.h"
 
 #define DEBUG
 #ifdef DEBUG
@@ -37,6 +38,17 @@ using namespace daisysp;
 #define AN_ENVELOPEGEN_SIG0DECAY A9
 #define AN_ENVELOPEGEN_SIG1DECAY A10
 #define AN_ENVELOPEGEN_SLOPESHAPE A11
+
+AveragedAnalog avAnClockRate;
+AveragedAnalog avAnPulserPeriod;
+AveragedAnalog avAnModoscFrequency;
+AveragedAnalog avAnModoscWaveform;
+AveragedAnalog avAnModoscAttenuator;
+AveragedAnalog avAnComplexoscTimbre;
+AveragedAnalog avAnComplexoscFrequency;
+AveragedAnalog avAnComplexoscAttenuator;
+AveragedAnalog avAnEnvelopegenSig0decay;
+AveragedAnalog avAnEnvelopegenSig1decay;
 
 //Digital input gpio definition
 #define DI_MIDIIN 1
@@ -267,6 +279,9 @@ float randomVoltageValue = 0.0f;
 float clockIncrement = 0.0f;
 float clockValue = 0.0f;
 
+//TODO REMOVE FROM HERE
+float fmFrequencyRamp;
+
 
 void OnTimerClockInterrupt() {
   if (clockValue == 0.0f) {
@@ -427,6 +442,8 @@ void loop() {
   digitalPinsread();
   mcpPinsRead();
   analogsRead();
+  Serial.print("fmFrequencyRamp : ");
+  Serial.println(fmFrequencyRamp);
 }
 
 
@@ -439,8 +456,8 @@ void ProcessAudio(float **in, float **out, size_t size) {
     float adsr1Value = multiShapeAdsr1.Process(false);  // for now there is no gate so we will only have adr
 
 
-    lowPassGateFilter0.SetFreq((sample_rate/2) * (adsr0Value*adsr0Value));
-    lowPassGateFilter1.SetFreq((sample_rate/2)* (adsr1Value*adsr1Value));
+    lowPassGateFilter0.SetFreq((sample_rate / 2) * (adsr0Value * adsr0Value));
+    lowPassGateFilter1.SetFreq((sample_rate / 2) * (adsr1Value * adsr1Value));
 
     float modulationOscSample = modulationOsc.Process();
 
@@ -472,7 +489,7 @@ void ProcessAudio(float **in, float **out, size_t size) {
       // modOscAttenuator 0..1 gain
       // fmFrequencyRamp --> example complexOscFrequency = 400hz --> 400 * 0.1 * ((-0.5..0.5)*0..1)
 
-      float fmFrequencyRamp = complexOscFrequency * 0.2 * ((modulationOscSample)*modOscAttenuator);
+      fmFrequencyRamp = complexOscFrequency * 0.5 * ((modulationOscSample)*modOscAttenuator);
       setComplexOscillatorFrequency(complexOscFrequency + fmFrequencyRamp);
       float complexSinusSample = complexOscSinus.Process();
       float complexBasisSample = complexOscBasis.Process();
@@ -483,7 +500,7 @@ void ProcessAudio(float **in, float **out, size_t size) {
     }
 
     //apply filter even if not used to keep it up to date
-    float lpgComplexMixed = lowPassGateFilter0.Process(attenuatedComplexMixed*2.0f);
+    float lpgComplexMixed = lowPassGateFilter0.Process(attenuatedComplexMixed * 2.0f);
     //TODO apply envelopeGenSig0DecayFactor
     if (envelope0Enable) {
 
@@ -498,7 +515,7 @@ void ProcessAudio(float **in, float **out, size_t size) {
     attenuatedComplexMixed = attenuatedComplexMixed * envelopeGenSig0Volume;
 
 
-    float lpgModulationMixed = lowPassGateFilter1.Process(modulationOscSample*2.0f);
+    float lpgModulationMixed = lowPassGateFilter1.Process(modulationOscSample * 2.0f);
     // add modulation osc
     if (envelopeGenSig1Volume > 0.02f) {
       if (envelope1Enable) {
@@ -710,38 +727,47 @@ void mcpPinsRead() {
 }
 
 void analogsRead() {
-  clockRate = simpleAnalogReadAndMap(AN_CLOCK_RATE, 0, 3);        //0..3Hz = 0..180 bpm
-  pulserPeriod = simpleAnalogReadAndMap(AN_PULSER_PERIOD, 0, 4);  //0..4Hz = 0..240 bpm
-  modOscFrequency = modOscFrequency * 0.9 + 0.1 * simpleAnalogReadAndMap(AN_MODOSC_FREQUENCY, 0, 8000);
-  modOscWaveform = simpleAnalogRead(AN_MODOSC_WAVEFORM);
-  modOscAttenuator = simpleAnalogRead(AN_MODOSC_ATTENUATOR);
-  complexOscTimbre = simpleAnalogRead(AN_COMPLEXOSC_TIMBRE);
-  complexOscFrequency = complexOscFrequency * 0.9 + 0.1 * simpleAnalogReadAndMap(AN_COMPLEXOSC_FREQUENCY, 0, 8000);
-  complexOscAttenuator = simpleAnalogRead(AN_COMPLEXOSC_ATTENUATOR);
-  envelopeGenSig0Decay = simpleAnalogRead(AN_ENVELOPEGEN_SIG0DECAY);
-  envelopeGenSig1Decay = simpleAnalogRead(AN_ENVELOPEGEN_SIG1DECAY);
+
+
+  avAnClockRate.updateValue(analogRead(AN_CLOCK_RATE));
+  avAnPulserPeriod.updateValue(analogRead(AN_PULSER_PERIOD));
+  avAnModoscFrequency.updateValue(analogRead(AN_MODOSC_FREQUENCY));
+  avAnModoscWaveform.updateValue(analogRead(AN_MODOSC_WAVEFORM));
+  avAnModoscAttenuator.updateValue(analogRead(AN_MODOSC_ATTENUATOR));
+  avAnComplexoscTimbre.updateValue(analogRead(AN_COMPLEXOSC_TIMBRE));
+  avAnComplexoscFrequency.updateValue(analogRead(AN_COMPLEXOSC_FREQUENCY));
+  avAnComplexoscAttenuator.updateValue(analogRead(AN_COMPLEXOSC_ATTENUATOR));
+  avAnEnvelopegenSig0decay.updateValue(analogRead(AN_ENVELOPEGEN_SIG0DECAY));
+  avAnEnvelopegenSig1decay.updateValue(analogRead(AN_ENVELOPEGEN_SIG1DECAY));
   envelopeGenSlopeShape = (int)simpleAnalogReadAndMap(AN_ENVELOPEGEN_SLOPESHAPE, 0, 6.5);
 
-  if (abs(complexOscFrequencyOld - complexOscFrequency) > 1) {  //TODO make this better
+  modOscWaveform = simpleAnalogNormalize(avAnModoscWaveform.getVal());
+  modOscAttenuator = simpleAnalogNormalize(avAnModoscAttenuator.getVal());
+  complexOscTimbre = simpleAnalogNormalize(avAnComplexoscTimbre.getVal());
+  complexOscAttenuator = simpleAnalogNormalize(avAnComplexoscAttenuator.getVal());
+
+  if (avAnComplexoscFrequency.hasValueUpdated()) {  //TODO make this better
+    complexOscFrequency = fmap(simpleAnalogNormalize(avAnComplexoscFrequency.getVal()), 0, 8000,Mapping::EXP);
     setComplexOscillatorFrequency(complexOscFrequency);
-    complexOscFrequencyOld = complexOscFrequency;
   }
 
-  if (abs(pulserPeriodOld - pulserPeriod) > TRIGGER_DIFF) {
+  if (avAnPulserPeriod.hasValueUpdated()) {
+    pulserPeriod = simpleAnalogNormalize(avAnPulserPeriod.getVal()) * 4.0f;  //0..4Hz = 0..240 bpm
     setPulserFrequency(pulserPeriod);
-    pulserPeriodOld = pulserPeriod;
   }
-  if (abs(clockRateOld - clockRate) > TRIGGER_DIFF) {
+
+  if (avAnClockRate.hasValueUpdated()) {
+    clockRate = simpleAnalogNormalize(avAnClockRate.getVal()) * 3.0f;  //0..3Hz = 0..180 bpm
     setClockFrequency(clockRate);
-    clockRateOld = clockRate;
   }
 
-  if (abs(modOscFrequencyOld - modOscFrequency) > 1) {  //TODO make this better
-    setModulationOscillatorFrequency(modOscFrequencyOld);
-    modOscFrequencyOld = modOscFrequency;
+  if (avAnModoscFrequency.hasValueUpdated()) {  //TODO make this better
+    modOscFrequency =  fmap(simpleAnalogNormalize(avAnModoscFrequency.getVal()), 0, 8000,Mapping::EXP);
+    setModulationOscillatorFrequency(modOscFrequency);
   }
 
-  if (abs(modOscWaveformOld - modOscWaveform) > TRIGGER_DIFF) {
+  if (avAnModoscWaveform.hasValueUpdated()) {
+    modOscWaveform = simpleAnalogNormalize(avAnModoscWaveform.getVal());
     if (modOscWaveform < 0.5) {
       //from tirangle to sawtooth 0 = triangle 0.5 = sawtooth
       // tirangle shape = 0, pw = 0.5
@@ -761,13 +787,15 @@ void analogsRead() {
 
 
 
-  if (abs(envelopeGenSig0DecayOld - envelopeGenSig0Decay) > TRIGGER_DIFF) {
+  if (avAnEnvelopegenSig0decay.hasValueUpdated()) {
+    envelopeGenSig0Decay = simpleAnalogNormalize(avAnEnvelopegenSig0decay.getVal());
+    Serial.println(envelopeGenSig0Decay);
     if (envelopeGenSig0Decay < 0.5f) {
 
       envelopeGenSig0Volume = 1.0f;
       // start to play with envelope, volume is 100%
       // if envelopeGenSig0Decay is at its minimum, disable envelope
-      if (envelopeGenSig0Decay < 0.05f) {
+      if (envelopeGenSig0Decay < 0.1f) {
         if (envelope0Enable == true) {
           envelope0Enable = false;
           Serial.println("Disable envelope 0");
@@ -789,13 +817,14 @@ void analogsRead() {
     envelopeGenSig0DecayOld = envelopeGenSig0Decay;
   }
 
-  if (abs(envelopeGenSig1DecayOld - envelopeGenSig1Decay) > TRIGGER_DIFF) {
+  if (avAnEnvelopegenSig1decay.hasValueUpdated()) {
+    envelopeGenSig1Decay = simpleAnalogNormalize(avAnEnvelopegenSig1decay.getVal());
     if (envelopeGenSig1Decay < 0.5f) {
 
       envelopeGenSig1Volume = 1.0f;
       // start to play with envelope, volume is 100%
       // if envelopeGenSig1Decay is at its minimum, disable envelope
-      if (envelopeGenSig1Decay < 0.05f) {
+      if (envelopeGenSig1Decay < 0.1f) {
         if (envelope1Enable == true) {
           envelope1Enable = false;
           Serial.println("Disable envelope 1");
@@ -932,9 +961,17 @@ float simpleAnalogRead(uint32_t pin) {
   return (1023.0 - (float)analogRead(pin)) / 1023.0;
 }
 
+float simpleAnalogNormalize(uint32_t value) {
+  return (1023.0 - (float)value) / 1023.0;
+}
+
 // Reads a simple pot and maps it to a value bewtween to integer values
 float simpleAnalogReadAndMap(uint32_t pin, long min, long max) {
   return map(1023 - analogRead(pin), 0, 1023, min, max);
+}
+
+float simpleAnalogMap(uint32_t value, long min, long max) {
+  return map(1023 - value, 0, 1023, min, max);
 }
 
 int8_t capacitiveSensorTouch() {
@@ -1086,21 +1123,29 @@ void setModulationOscillatorFrequency(float frequency) {
 
 void setPulserFrequency(float frequency) {
 
-  timerPulser.setPrescaleFactor(20000);             // = Set prescaler to 4800 => timer frequency = 200MHz / 20000  = 10'000 Hz
-  timerPulser.setOverflow(int(10000 / frequency));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency
-  timerPulser.refresh();                            // Make register changes take effect
-  timerPulser.resume();                             // Start
+  if (frequency < 0.08f)
+    frequency = 0.08;  //put 0.02 so overflow = 50000 --> which is 16 bits
+  //prescaler 16 bits, overflow 16bits
+  timerPulser.setPrescaleFactor(40000);           // = Set prescaler to 4800 => timer frequency = 200MHz / 40000  = 5000 Hz
+  timerPulser.setOverflow(int(5000 / frequency));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency
+  timerPulser.refresh();                           // Make register changes take effect
+  timerPulser.resume();                            // Start
   pulserIncrement = frequency / sample_rate;
 }
 
 void setClockFrequency(float frequency) {
 
+  if (frequency < 0.04f)
+    frequency = 0.04;  //put 0.01 so overflow = 50000 --> which is 16 bits
+
+  //prescaler 16 bits, overflow 16bits
+
   //frequency *2 to make a 50% duty cycle square signal
 
-  timerClock.setPrescaleFactor(20000);                   // = Set prescaler to 4800 => timer frequency = 200MHz / 20000  = 10'000 Hz
-  timerClock.setOverflow(int(10000 / (frequency * 2)));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency
-  timerClock.refresh();                                  // Make register changes take effect
-  timerClock.resume();                                   // Start
+  timerClock.setPrescaleFactor(40000);                 // = Set prescaler to 4800 => timer frequency = 200MHz / 40000  = 5000 Hz
+  timerClock.setOverflow(int(5000 / (frequency * 2)));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency
+  timerClock.refresh();                                 // Make register changes take effect
+  timerClock.resume();                                  // Start
   clockIncrement = frequency / sample_rate;
 }
 
