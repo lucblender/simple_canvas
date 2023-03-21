@@ -8,25 +8,32 @@
 
 class AveragedAnalog {
 public:
-  AveragedAnalog() {
+  AveragedAnalog(bool useFloatAverage = false) {
     this->initArray();
     thersholdValue = 2;
+    this->useFloatAverage = useFloatAverage;
   }
-  AveragedAnalog(uint32_t thersholdValue) {
+  AveragedAnalog(uint32_t thersholdValue, bool useFloatAverage = false) {
     this->initArray();
     this->thersholdValue = thersholdValue;
+    this->useFloatAverage = useFloatAverage;
   }
   ~AveragedAnalog() {}
 
   void updateValue(uint32_t newValue);
   bool hasValueUpdated();
   uint32_t getVal();
+  float getFVal();
 private:
   void initArray();
   uint32_t potValues[AVERAGE_LEN];
   uint8_t potValueIndex = 0;
   uint32_t potVal;
   uint32_t potValOld;
+
+  bool useFloatAverage;
+  float fPotVal;
+  float fPotValOld;
 
   uint32_t thersholdValue;
 };

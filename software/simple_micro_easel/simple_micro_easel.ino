@@ -41,11 +41,11 @@ using namespace daisysp;
 
 AveragedAnalog avAnClockRate;
 AveragedAnalog avAnPulserPeriod;
-AveragedAnalog avAnModoscFrequency;
+AveragedAnalog avAnModoscFrequency(true);
 AveragedAnalog avAnModoscWaveform;
 AveragedAnalog avAnModoscAttenuator;
 AveragedAnalog avAnComplexoscTimbre;
-AveragedAnalog avAnComplexoscFrequency;
+AveragedAnalog avAnComplexoscFrequency(true);
 AveragedAnalog avAnComplexoscAttenuator;
 AveragedAnalog avAnEnvelopegenSig0decay;
 AveragedAnalog avAnEnvelopegenSig1decay;
@@ -279,10 +279,6 @@ float randomVoltageValue = 0.0f;
 float clockIncrement = 0.0f;
 float clockValue = 0.0f;
 
-//TODO REMOVE FROM HERE
-float fmFrequencyRamp;
-
-
 void OnTimerClockInterrupt() {
   if (clockValue == 0.0f) {
     clockValue = 1.0f;
@@ -442,8 +438,6 @@ void loop() {
   digitalPinsread();
   mcpPinsRead();
   analogsRead();
-  Serial.print("fmFrequencyRamp : ");
-  Serial.println(fmFrequencyRamp);
 }
 
 
@@ -464,38 +458,47 @@ void ProcessAudio(float **in, float **out, size_t size) {
     float attenuatedModulationOscSample = modulationOscSample * modOscAttenuator;
     float attenuatedComplexMixed;
 
-    if (modOscAmFm == 0) {  //0 = AM
+    if (modOscAttenuator > 0.1f) {
+      if (modOscAmFm == 0) {  //0 = AM
 
-      // si attenuator = 0 --> signal sans modulation  signal = attenuatedComplexMixed
-      // si attenuator = 1 --> signal modulation max  signal = attenuatedComplexMixed * 100% of (attenuatedModulationOscSample)
+        // si attenuator = 0 --> signal sans modulation  signal = attenuatedComplexMixed
+        // si attenuator = 1 --> signal modulation max  signal = attenuatedComplexMixed * 100% of (attenuatedModulationOscSample)
 
-      //si attenuator = 0 --> signal
+        //si attenuator = 0 --> signal
 
-      // modulationOscSample oscillate -1..1
-      // modOscAttenuator 0..1 gain
+        // modulationOscSample oscillate -1..1
+        // modOscAttenuator 0..1 gain
 
-      float gain = 1.0f - (((modulationOscSample + 1.0f) / 2) * modOscAttenuator);
+        float gain = 1.0f - (((modulationOscSample + 1.0f) / 2) * modOscAttenuator);
 
+
+        float complexSinusSample = complexOscSinus.Process();
+        float complexBasisSample = complexOscBasis.Process();
+
+        float complexMixed = (1.0 - complexOscTimbre) * complexSinusSample + complexOscTimbre * complexBasisSample;
+        attenuatedComplexMixed = complexMixed * complexOscAttenuator * gain;
+      } else {  // 1 = FM
+
+        // modulationOscSample oscillate -1..1
+        //(modulationOscSample * 0.5f) -0.5 .. 0.5
+        // modOscAttenuator 0..1 gain
+        // fmFrequencyRamp --> example complexOscFrequency = 400hz --> 400 * 0.1 * ((-0.5..0.5)*0..1)
+
+        float fmFrequencyRamp = complexOscFrequency * 0.5 * ((modulationOscSample)*modOscAttenuator);
+        setComplexOscillatorFrequency(complexOscFrequency + fmFrequencyRamp);
+        float complexSinusSample = complexOscSinus.Process();
+        float complexBasisSample = complexOscBasis.Process();
+
+        float complexMixed = (1.0 - complexOscTimbre) * complexSinusSample + complexOscTimbre * complexBasisSample;
+
+        attenuatedComplexMixed = complexMixed * complexOscAttenuator;
+      }
+    } else {
 
       float complexSinusSample = complexOscSinus.Process();
       float complexBasisSample = complexOscBasis.Process();
 
       float complexMixed = (1.0 - complexOscTimbre) * complexSinusSample + complexOscTimbre * complexBasisSample;
-      attenuatedComplexMixed = complexMixed * complexOscAttenuator * gain;
-    } else {  // 1 = FM
-
-      // modulationOscSample oscillate -1..1
-      //(modulationOscSample * 0.5f) -0.5 .. 0.5
-      // modOscAttenuator 0..1 gain
-      // fmFrequencyRamp --> example complexOscFrequency = 400hz --> 400 * 0.1 * ((-0.5..0.5)*0..1)
-
-      fmFrequencyRamp = complexOscFrequency * 0.5 * ((modulationOscSample)*modOscAttenuator);
-      setComplexOscillatorFrequency(complexOscFrequency + fmFrequencyRamp);
-      float complexSinusSample = complexOscSinus.Process();
-      float complexBasisSample = complexOscBasis.Process();
-
-      float complexMixed = (1.0 - complexOscTimbre) * complexSinusSample + complexOscTimbre * complexBasisSample;
-
       attenuatedComplexMixed = complexMixed * complexOscAttenuator;
     }
 
@@ -747,7 +750,7 @@ void analogsRead() {
   complexOscAttenuator = simpleAnalogNormalize(avAnComplexoscAttenuator.getVal());
 
   if (avAnComplexoscFrequency.hasValueUpdated()) {  //TODO make this better
-    complexOscFrequency = fmap(simpleAnalogNormalize(avAnComplexoscFrequency.getVal()), 0, 8000,Mapping::EXP);
+    complexOscFrequency = fmap(simpleAnalogNormalize(avAnComplexoscFrequency.getFVal()), 0, 8000, Mapping::EXP);
     setComplexOscillatorFrequency(complexOscFrequency);
   }
 
@@ -762,7 +765,7 @@ void analogsRead() {
   }
 
   if (avAnModoscFrequency.hasValueUpdated()) {  //TODO make this better
-    modOscFrequency =  fmap(simpleAnalogNormalize(avAnModoscFrequency.getVal()), 0, 8000,Mapping::EXP);
+    modOscFrequency = fmap(simpleAnalogNormalize(avAnModoscFrequency.getFVal()), 0, 8000, Mapping::EXP);
     setModulationOscillatorFrequency(modOscFrequency);
   }
 
@@ -965,6 +968,10 @@ float simpleAnalogNormalize(uint32_t value) {
   return (1023.0 - (float)value) / 1023.0;
 }
 
+float simpleAnalogNormalize(float value) {
+  return (1023.0 - value) / 1023.0;
+}
+
 // Reads a simple pot and maps it to a value bewtween to integer values
 float simpleAnalogReadAndMap(uint32_t pin, long min, long max) {
   return map(1023 - analogRead(pin), 0, 1023, min, max);
@@ -1126,7 +1133,7 @@ void setPulserFrequency(float frequency) {
   if (frequency < 0.08f)
     frequency = 0.08;  //put 0.02 so overflow = 50000 --> which is 16 bits
   //prescaler 16 bits, overflow 16bits
-  timerPulser.setPrescaleFactor(40000);           // = Set prescaler to 4800 => timer frequency = 200MHz / 40000  = 5000 Hz
+  timerPulser.setPrescaleFactor(40000);            // = Set prescaler to 4800 => timer frequency = 200MHz / 40000  = 5000 Hz
   timerPulser.setOverflow(int(5000 / frequency));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency
   timerPulser.refresh();                           // Make register changes take effect
   timerPulser.resume();                            // Start
@@ -1142,7 +1149,7 @@ void setClockFrequency(float frequency) {
 
   //frequency *2 to make a 50% duty cycle square signal
 
-  timerClock.setPrescaleFactor(40000);                 // = Set prescaler to 4800 => timer frequency = 200MHz / 40000  = 5000 Hz
+  timerClock.setPrescaleFactor(40000);                  // = Set prescaler to 4800 => timer frequency = 200MHz / 40000  = 5000 Hz
   timerClock.setOverflow(int(5000 / (frequency * 2)));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency
   timerClock.refresh();                                 // Make register changes take effect
   timerClock.resume();                                  // Start
