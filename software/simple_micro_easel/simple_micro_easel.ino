@@ -91,13 +91,17 @@ AveragedAnalog avAnEnvelopegenSig1decay;
 
 uint8_t DI_SEQUENCER_STEPSELECT[5] = { DI_SEQUENCER_STEPSELECT0, DI_SEQUENCER_STEPSELECT1, DI_SEQUENCER_STEPSELECT2, DI_SEQUENCER_STEPSELECT3, DI_SEQUENCER_STEPSELECT4 };
 
+#define SEQUENCER_AN_MIN 27
+#define SEQUENCER_AN_MAX 920
+#define SEQUENCER_AN_RANGE (SEQUENCER_AN_MAX - SEQUENCER_AN_MIN)
+
 //analog pins value
 float sequencerStepAnalogIn[5];
 float clockRate;
 float envelopeGenSig1Decay;
 int envelopeGenSlopeShape;
 float pulserPeriod;
-float modOscFrequency;
+float modOscFrequency = 440.0f; //just in case we set frequency with it before it succeed to read the analog value, should never happen
 float modOscWaveform;
 float modOscAttenuator;
 float complexOscTimbre;
@@ -293,6 +297,8 @@ float clockFrequency = 0.0f;
 float clockPeriodSecond = 0.0f;
 
 float randomVoltageValue = 0.0f;
+float adsr0Value = 0.0f;
+float adsr1Value = 0.0f;
 
 float clockIncrement = 0.0f;
 float clockValue = 0.0f;
@@ -443,10 +449,10 @@ void setup() {
   complexOscSinus.SetAmp(1);
 
   complexOscBasis.Init(sample_rate);
-  setComplexOscillatorFrequency(220);
+  setComplexOscillatorFrequency(0.0f);
 
   modulationOsc.Init(sample_rate);
-  setModulationOscillatorFrequency(220);
+  setModulationOscillatorFrequency();
 
   setPulserFrequency(3);
   timerPulser.resume();  // Start
@@ -503,13 +509,14 @@ void ProcessAudio(float **in, float **out, size_t size) {
 
     pulserProcess();
 
-    float adsr0Value = multiShapeAdsr0.Process(false);  // for now there is no gate so we will only have adr
-    float adsr1Value = multiShapeAdsr1.Process(false);  // for now there is no gate so we will only have adr
+    adsr0Value = multiShapeAdsr0.Process(false);  // for now there is no gate so we will only have adr
+    adsr1Value = multiShapeAdsr1.Process(false);  // for now there is no gate so we will only have adr
 
 
     lowPassGateFilter0.SetFreq((sample_rate / 2) * (adsr0Value * adsr0Value));
     lowPassGateFilter1.SetFreq((sample_rate / 2) * (adsr1Value * adsr1Value));
 
+    setModulationOscillatorFrequency();
     float modulationOscSample = modulationOsc.Process();
 
     float attenuatedModulationOscSample = modulationOscSample * modOscAttenuator;
@@ -529,6 +536,7 @@ void ProcessAudio(float **in, float **out, size_t size) {
         float gain = 1.0f - (((modulationOscSample + 1.0f) / 2) * modOscAttenuator);
 
 
+        setComplexOscillatorFrequency(0.0f);
         float complexSinusSample = complexOscSinus.Process();
         float complexBasisSample = complexOscBasis.Process();
 
@@ -541,8 +549,8 @@ void ProcessAudio(float **in, float **out, size_t size) {
         // modOscAttenuator 0..1 gain
         // fmFrequencyRamp --> example complexOscFrequency = 400hz --> 400 * 0.1 * ((-0.5..0.5)*0..1)
 
-        float fmFrequencyRamp = complexOscFrequency * 0.5 * ((modulationOscSample)*modOscAttenuator);
-        setComplexOscillatorFrequency(complexOscFrequency + fmFrequencyRamp);
+        float fmModulationFactor = 0.5 * ((modulationOscSample)*modOscAttenuator);
+        setComplexOscillatorFrequency(fmModulationFactor);
         float complexSinusSample = complexOscSinus.Process();
         float complexBasisSample = complexOscBasis.Process();
 
@@ -551,7 +559,7 @@ void ProcessAudio(float **in, float **out, size_t size) {
         attenuatedComplexMixed = complexMixed * complexOscAttenuator;
       }
     } else {
-
+      setComplexOscillatorFrequency(0.0f);
       float complexSinusSample = complexOscSinus.Process();
       float complexBasisSample = complexOscBasis.Process();
 
@@ -808,8 +816,6 @@ void analogsRead() {
 
   if (avAnComplexoscFrequency.hasValueUpdated()) {  //TODO make this better
     complexOscFrequency = fmap(simpleAnalogNormalize(avAnComplexoscFrequency.getFVal()), 0, 8000, Mapping::EXP);
-    Serial.print(avAnComplexoscFrequency.getFVal());
-    setComplexOscillatorFrequency(complexOscFrequency);
   }
 
   if (avAnPulserPeriod.hasValueUpdated()) {
@@ -824,7 +830,6 @@ void analogsRead() {
 
   if (avAnModoscFrequency.hasValueUpdated()) {  //TODO make this better
     modOscFrequency = fmap(simpleAnalogNormalize(avAnModoscFrequency.getFVal()), 0, 8000, Mapping::EXP);
-    setModulationOscillatorFrequency(modOscFrequency);
   }
 
   if (avAnModoscWaveform.hasValueUpdated()) {
@@ -985,9 +990,14 @@ void analogsRead() {
 
 void sequencerCurrentStepRead() {
   uint8_t nextSequencerIndex = (sequencerIndex + 1) % sequencerLenght;
-  ;
 
-  sequencerValue = analogRead(AN_SEQUENCER_STEPANALOGIN);  //analog value goes from ~27 to ~920 because of 0.7V loss of the diod
+  float sequencerAnalogValue = analogRead(AN_SEQUENCER_STEPANALOGIN);  //analog value goes from ~27 to ~920 because of 0.7V loss of the diode
+
+  sequencerValue = (sequencerAnalogValue - (float)SEQUENCER_AN_MIN) / (float)SEQUENCER_AN_RANGE;
+  if (sequencerValue > 1.0f)
+    sequencerValue = 1.0f;
+  if (sequencerValue < 0.0f)
+    sequencerValue = 0.0f;
 
   //start with all pins to 0
   for (int i = 0; i < 5; i++) {
@@ -998,12 +1008,11 @@ void sequencerCurrentStepRead() {
   //Prepare for next sequential voltage source
   pinMode(DI_SEQUENCER_STEPSELECT[nextSequencerIndex], OUTPUT);
   digitalWrite(DI_SEQUENCER_STEPSELECT[nextSequencerIndex], 1);
-  /*
+
   DEBUG_PRINT("Read step ");
   DEBUG_PRINT(sequencerIndex);
   DEBUG_PRINT(" : ");
   DEBUG_PRINTLN(sequencerValue);
-  */
 }
 
 float semitone_to_hertz(int8_t note_number) {
@@ -1167,17 +1176,44 @@ void capacitiveStateMachine() {
   lastCapacitiveState = capacitiveState;
 }
 
-void setComplexOscillatorFrequency(float frequency) {
-  Serial.print("setComplexOscillatorFrequency ");
-  Serial.println(frequency);
-  complexOscBasis.SetFreq(frequency);
-  complexOscBasis.SetSyncFreq(frequency);
-  complexOscSinus.SetFreq(frequency);
+void setComplexOscillatorFrequency(float fmModulationFactor) {  //TODO
+  float finalFrequency;
+
+  if (destinationPatches[OSC_A_FRQ] != NONE_SOURCE) {
+    float modulationFactor = getModulationFactorFromPatch(destinationPatches[OSC_A_FRQ]);
+    float modulationFrequency = fmap(modulationFactor, 0, 8000, Mapping::EXP);
+    finalFrequency = modulationFrequency + complexOscFrequency;
+  }
+
+  else {
+    finalFrequency = complexOscFrequency;
+  }
+
+  if (fmModulationFactor != 0.0f) {
+    finalFrequency = finalFrequency + finalFrequency * fmModulationFactor;
+  }
+
+  complexOscBasis.SetFreq(finalFrequency);
+  complexOscBasis.SetSyncFreq(finalFrequency);
+  complexOscSinus.SetFreq(finalFrequency);
 }
 
-void setModulationOscillatorFrequency(float frequency) {
-  modulationOsc.SetSyncFreq(frequency);
-  modulationOsc.SetFreq(frequency);
+void setModulationOscillatorFrequency() {
+
+  float finalFrequency;
+
+  if (destinationPatches[OSC_B_FRQ] != NONE_SOURCE) {
+    float modulationFactor = getModulationFactorFromPatch(destinationPatches[OSC_B_FRQ]);
+    float modulationFrequency = fmap(modulationFactor, 0, 8000, Mapping::EXP);
+    finalFrequency = modulationFrequency + modOscFrequency;
+  }
+
+  else {
+    finalFrequency = modOscFrequency;
+  }
+
+  modulationOsc.SetSyncFreq(finalFrequency);
+  modulationOsc.SetFreq(finalFrequency);
 }
 
 void setPulserFrequency(float frequency) {
@@ -1299,5 +1335,22 @@ void updateTimedLeds() {
   if (pulserLedCount > LED_OFF_COUNT) {
     pulserLedCount = 0;
     setPulserLed(false);
+  }
+}
+
+float getModulationFactorFromPatch(int8_t patchValue) {
+  switch (patchValue) {
+    case NONE_SOURCE:
+      return 0.0f;
+
+    case SEQUENCER:
+      return sequencerValue;
+
+    case PULSER:
+      return pulserValue;
+    case RANDOM:
+      return randomVoltageValue;
+    case ENVELOPE_B:
+      return adsr1Value;
   }
 }
