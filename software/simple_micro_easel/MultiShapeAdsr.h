@@ -23,7 +23,7 @@ class MultiShapeAdsr {
 public:
   MultiShapeAdsr() {}
   ~MultiShapeAdsr() {}
-  void Init(float sample_rate);
+  void Init(float sample_rate, bool adsrOrAr);
   float Process(bool gate);
   void setAttackShape(uint8_t shape);
   void setDecayShape(uint8_t shape);
@@ -34,42 +34,44 @@ public:
   void setDecayTime(float timeInS);
   void setReleaseTime(float timeInS);
   void setSustainLevel(float sustainValue);
-private:
-  float currentOutput = 0.0f;
-  uint8_t currentStatus = MULTISHAPE_ADSR_SEG_IDLE;
-  uint32_t indexTimer = 0;
+  void setAttackStartReleaseEndLevel(float value);
+  private:
+    bool adsrOrAr;
+    float currentOutput = 0.0f;
+    uint8_t currentStatus = MULTISHAPE_ADSR_SEG_IDLE;
+    uint32_t indexTimer = 0;
 
-  float sampleRate;
-  float sampleTime;
+    float sampleRate;
+    float sampleTime;
 
-  uint8_t attackShape = LINEAR_SHAPE;
-  uint8_t decayShape = LINEAR_SHAPE;
-  uint8_t releaseShape = LINEAR_SHAPE;
-  uint8_t mode = MULTISHAPE_ADSR_SEG_IDLE;
+    uint8_t attackShape = LINEAR_SHAPE;
+    uint8_t decayShape = LINEAR_SHAPE;
+    uint8_t releaseShape = LINEAR_SHAPE;
+    uint8_t mode = MULTISHAPE_ADSR_SEG_IDLE;
 
-  float attackTime;
-  float decayTime;
-  float releaseTime;
+    float attackTime;
+    float decayTime;
+    float releaseTime;
 
-  float attackStart;
-  float attackEnd;
-  float attackRange;
+    float attackStart;
+    float attackEnd;
+    float attackRange;
 
-  float decayStart;
-  float decayEnd;
-  float decayRange;
+    float decayStart;
+    float decayEnd;
+    float decayRange;
 
-  float releaseStart;
-  float releaseEnd;
-  float releaseRange;
+    float releaseStart;
+    float releaseEnd;
+    float releaseRange;
 
-  uint32_t attackSampleCount;
-  uint32_t decaySampleCount;
-  uint32_t releaseSampleCount;
+    uint32_t attackSampleCount;
+    uint32_t decaySampleCount;
+    uint32_t releaseSampleCount;
 
-  float interpolateRisingSlope(uint8_t slopeShape, uint32_t indexTimer, uint32_t nSample, float range, float startRise);
-  float interpolateFallingSlope(uint8_t slopeShape, uint32_t indexTimer, uint32_t nSample, float range, float endFall);
-};
+    float interpolateRisingSlope(uint8_t slopeShape, uint32_t indexTimer, uint32_t nSample, float range, float startRise);
+    float interpolateFallingSlope(uint8_t slopeShape, uint32_t indexTimer, uint32_t nSample, float range, float endFall);
+  };
 
-float squareFloat(float x);
+  float squareFloat(float x);
 #endif  // MULTI_SHAPE_ADSR_H

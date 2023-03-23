@@ -1,11 +1,14 @@
 #include "MultiShapeAdsr.h"
 #include "Arduino.h"
 
-void MultiShapeAdsr::Init(float sampleRate) {
+void MultiShapeAdsr::Init(float sampleRate, bool adsrOrAr) {
+  this->adsrOrAr = adsrOrAr;
   this->sampleRate = sampleRate;
   this->sampleTime = 1 / sampleRate;
-
-  this->setSustainLevel(0.7f);
+  if (this->adsrOrAr)  //true = adsr, false = ar
+    this->setSustainLevel(0.7f);
+  else
+    this->setSustainLevel(1.0f);
 }
 float MultiShapeAdsr::Process(bool gate) {
 
@@ -21,7 +24,10 @@ float MultiShapeAdsr::Process(bool gate) {
         //(uint8_t slopeShape, uint32_t indexTimer, uint32_t nSample, float range, float startRise
         this->currentOutput = this->interpolateRisingSlope(this->attackShape, this->indexTimer, this->attackSampleCount, this->attackRange, this->attackStart);
         if (this->indexTimer > this->attackSampleCount - 1) {
-          this->currentStatus = MULTISHAPE_ADSR_SEG_DECAY;
+          if (this->adsrOrAr)  //true = adsr, false = ar
+            this->currentStatus = MULTISHAPE_ADSR_SEG_DECAY;
+          else
+            this->currentStatus = MULTISHAPE_ADSR_SEG_RELEASE;
           this->indexTimer = 0;
         }
         break;
@@ -106,6 +112,18 @@ void MultiShapeAdsr::setReleaseTime(float timeInS) {
   Serial.println(releaseTime);
   Serial.print(" releaseSampleCount ");
   Serial.println(releaseSampleCount);*/
+}
+
+void MultiShapeAdsr::setAttackStartReleaseEndLevel(float value) {
+  if (value > 1.0f)
+    value = 1.0f;
+    
+  this->attackStart = value;
+  this->releaseEnd = value;
+
+  this->attackRange = this->attackEnd - this->attackStart;
+  this->decayRange = this->decayStart - this->decayEnd;
+  this->releaseRange = this->releaseStart - this->releaseEnd;
 }
 
 void MultiShapeAdsr::setSustainLevel(float sustainValue) {

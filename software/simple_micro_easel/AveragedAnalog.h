@@ -28,14 +28,15 @@ private:
   void initArray();
   uint32_t potValues[AVERAGE_LEN];
   uint8_t potValueIndex = 0;
-  uint32_t potVal;
-  uint32_t potValOld;
+  uint32_t potVal = 0;
+  uint32_t potValOld = 0;
 
   bool useFloatAverage;
-  float fPotVal;
-  float fPotValOld;
+  float fPotVal = 0.0f;
+  float fPotValOld = 0.0f;
 
   uint32_t thersholdValue;
+  bool initialized = false;
 };
 
 

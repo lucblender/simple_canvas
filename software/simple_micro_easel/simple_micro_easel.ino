@@ -39,8 +39,9 @@ using namespace daisysp;
 #define AN_ENVELOPEGEN_SIG1DECAY A10
 #define AN_ENVELOPEGEN_SLOPESHAPE A11
 
-AveragedAnalog avAnClockRate;
-AveragedAnalog avAnPulserPeriod;
+AveragedAnalog avAnClockRate((uint32_t)4);
+;
+AveragedAnalog avAnPulserPeriod((uint32_t)4);
 AveragedAnalog avAnModoscFrequency(true);
 AveragedAnalog avAnModoscWaveform;
 AveragedAnalog avAnModoscAttenuator;
@@ -185,12 +186,6 @@ float sample_rate;
 MultiShapeAdsr multiShapeAdsr0;
 MultiShapeAdsr multiShapeAdsr1;
 
-// ----------------- Neopixels -----------------------------------
-
-#define NUMPIXELS 13
-
-Adafruit_NeoPixel pixels(NUMPIXELS, DI_LEDS_DIN, NEO_GRB + NEO_KHZ800);
-
 // ----------------- Capacitive sensor ---------------------------
 #define THRESHOLD_TOUCHED 200
 #define INPUT_TOUCH_COUNT 4
@@ -251,6 +246,23 @@ int lastCapacitiveState = IDLE;
 int8_t inputPressedIndex;
 int8_t outputPressedIndex;
 
+// ----------------- Neopixels -----------------------------------
+
+#define LED_OFF_COUNT 4
+//TOTAL_TOUCH_COUNT = 9
+#define SEQUENCER_LED TOTAL_TOUCH_COUNT
+#define RANDOM_VOLTAGE_LED SEQUENCER_LED + 1
+#define PULSER_VOLTAGE_LED RANDOM_VOLTAGE_LED + 1
+#define ENVELOPE_VOLTAGE_LED PULSER_VOLTAGE_LED + 1
+bool envolpeLedStatus = false;
+bool pulserLedStatus = false;
+uint32_t envolpeLedCount = 0;
+uint32_t pulserLedCount = 0;
+
+#define NUMPIXELS ENVELOPE_VOLTAGE_LED + 1
+
+Adafruit_NeoPixel pixels(NUMPIXELS, DI_LEDS_DIN, NEO_GRB + NEO_KHZ800);
+
 //Blue
 uint32_t sequencerColor = pixels.Color(0, 0, 120);
 uint32_t sequencerColorHighlighted = pixels.Color(0, 0, 255);
@@ -274,6 +286,12 @@ HardwareTimer timerClock(TIM1);
 HardwareTimer timerPulser(TIM2);
 float pulserIncrement = 0.0f;
 float pulserValue = 0.0f;
+
+float pulserFrequency = 0.0f;
+float pulserPeriodSecond = 0.0f;
+float clockFrequency = 0.0f;
+float clockPeriodSecond = 0.0f;
+
 float randomVoltageValue = 0.0f;
 
 float clockIncrement = 0.0f;
@@ -282,19 +300,37 @@ float clockValue = 0.0f;
 void OnTimerClockInterrupt() {
   if (clockValue == 0.0f) {
     clockValue = 1.0f;
-    if (pulserTriggerSource == CLOCK_TRIGGER)
+    if (pulserTriggerSource == CLOCK_TRIGGER) {
       pulserValue = 1.0f;
-    if (randomVoltageTriggerSource == CLOCK_TRIGGER)
+      setPulserLed(true);
+    }
+    if (randomVoltageTriggerSource == CLOCK_TRIGGER) {
       generateRandomVoltage();
+      setRandomLed(randomVoltageValue);
+    }
     if (sequencerTriggerSource == CLOCK_TRIGGER) {
       sequencerCurrentStepRead();
       sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
+      setSequencerLed(sequencerIndex);
     }
     if (envelopeGenSig0TriggerSource == CLOCK_TRIGGER) {
+      if (envelopeGenSig0DecayFactor > 0.75f) {
+        multiShapeAdsr0.setAttackStartReleaseEndLevel(1.0f - (4.0f * (1.0f - envelopeGenSig0DecayFactor)));
+      } else {
+        multiShapeAdsr0.setAttackStartReleaseEndLevel(0.0f);
+      }
+      multiShapeAdsr0.setReleaseTime(clockPeriodSecond * envelopeGenSig0DecayFactor * 1.2f);
       multiShapeAdsr0.retrigger();
     }
     if (envelopeGenSig1TriggerSource == CLOCK_TRIGGER) {
+      if (envelopeGenSig1DecayFactor > 0.75f) {
+        multiShapeAdsr1.setAttackStartReleaseEndLevel(1.0f - (4.0f * (1.0f - envelopeGenSig1DecayFactor)));
+      } else {
+        multiShapeAdsr1.setAttackStartReleaseEndLevel(0.0f);
+      }
+      multiShapeAdsr1.setReleaseTime(clockPeriodSecond * envelopeGenSig1DecayFactor * 1.2f);
       multiShapeAdsr1.retrigger();
+      setEnvelopeLed(true);
     }
   } else {
     clockValue = 0.0f;
@@ -302,18 +338,37 @@ void OnTimerClockInterrupt() {
 }
 
 void OnTimerPulserInterrupt() {
-  if (pulserTriggerSource == PULSER_TRIGGER)
+  if (pulserTriggerSource == PULSER_TRIGGER) {
     pulserValue = 1.0f;
-  if (randomVoltageTriggerSource == PULSER_TRIGGER)
+    setPulserLed(true);
+  }
+  if (randomVoltageTriggerSource == PULSER_TRIGGER) {
     generateRandomVoltage();
+    setRandomLed(randomVoltageValue);
+  }
   if (sequencerTriggerSource == PULSER_TRIGGER) {
     sequencerCurrentStepRead();
     sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
+    setSequencerLed(sequencerIndex);
   }
-  if (envelopeGenSig0TriggerSource == PULSER_TRIGGER)
+  if (envelopeGenSig0TriggerSource == PULSER_TRIGGER) {
+    if (envelopeGenSig0DecayFactor > 0.75f) {
+      multiShapeAdsr0.setAttackStartReleaseEndLevel(1.0f - (4.0f * (1.0f - envelopeGenSig0DecayFactor)));
+    } else {
+      multiShapeAdsr0.setAttackStartReleaseEndLevel(0.0f);
+    }
+    multiShapeAdsr0.setReleaseTime(pulserPeriodSecond * envelopeGenSig0DecayFactor * 1.2f);
     multiShapeAdsr0.retrigger();
+  }
   if (envelopeGenSig1TriggerSource == PULSER_TRIGGER) {
+    if (envelopeGenSig1DecayFactor > 0.75f) {
+      multiShapeAdsr1.setAttackStartReleaseEndLevel(1.0f - (4.0f * (1.0f - envelopeGenSig1DecayFactor)));
+    } else {
+      multiShapeAdsr1.setAttackStartReleaseEndLevel(0.0f);
+    }
+    multiShapeAdsr1.setReleaseTime(pulserPeriodSecond * envelopeGenSig1DecayFactor * 1.2f);
     multiShapeAdsr1.retrigger();
+    setEnvelopeLed(true);
   }
 }
 
@@ -394,29 +449,30 @@ void setup() {
   setModulationOscillatorFrequency(220);
 
   setPulserFrequency(3);
+  timerPulser.resume();  // Start
   timerPulser.attachInterrupt(OnTimerPulserInterrupt);
 
   setClockFrequency(3);
   timerClock.attachInterrupt(OnTimerClockInterrupt);
 
   // init adsr
-  multiShapeAdsr0.Init(sample_rate);
-  multiShapeAdsr0.setSustainLevel(.7);
+  multiShapeAdsr0.Init(sample_rate, false);  //true = adsr, false = ar
   multiShapeAdsr0.setAttackTime(0.1);
   multiShapeAdsr0.setReleaseTime(0.1);
-  multiShapeAdsr0.setDecayTime(0.1);
   multiShapeAdsr0.setAttackShape(LINEAR_SHAPE);
   multiShapeAdsr0.setDecayShape(LINEAR_SHAPE);
   multiShapeAdsr0.setReleaseShape(LINEAR_SHAPE);
+  // multiShapeAdsr0.setDecayTime(0.1); //uncomment if adsr and not just ar
+  // multiShapeAdsr0.setSustainLevel(.7); //uncomment if adsr and not just ar
 
-  multiShapeAdsr1.Init(sample_rate);
-  multiShapeAdsr1.setSustainLevel(.7);
+  multiShapeAdsr1.Init(sample_rate, false);  //true = adsr, false = ar
   multiShapeAdsr1.setAttackTime(0.1);
   multiShapeAdsr1.setReleaseTime(0.1);
-  multiShapeAdsr1.setDecayTime(0.1);
   multiShapeAdsr1.setAttackShape(LINEAR_SHAPE);
   multiShapeAdsr1.setDecayShape(LINEAR_SHAPE);
   multiShapeAdsr1.setReleaseShape(LINEAR_SHAPE);
+  // multiShapeAdsr1.setDecayTime(0.1);//uncomment if adsr and not just ar
+  // multiShapeAdsr1.setSustainLevel(.7);//uncomment if adsr and not just ar
 
   // init lpg
   lowPassGateFilter0.Init(sample_rate);
@@ -438,6 +494,7 @@ void loop() {
   digitalPinsread();
   mcpPinsRead();
   analogsRead();
+  updateTimedLeds();
 }
 
 
@@ -751,6 +808,7 @@ void analogsRead() {
 
   if (avAnComplexoscFrequency.hasValueUpdated()) {  //TODO make this better
     complexOscFrequency = fmap(simpleAnalogNormalize(avAnComplexoscFrequency.getFVal()), 0, 8000, Mapping::EXP);
+    Serial.print(avAnComplexoscFrequency.getFVal());
     setComplexOscillatorFrequency(complexOscFrequency);
   }
 
@@ -792,25 +850,21 @@ void analogsRead() {
 
   if (avAnEnvelopegenSig0decay.hasValueUpdated()) {
     envelopeGenSig0Decay = simpleAnalogNormalize(avAnEnvelopegenSig0decay.getVal());
-    Serial.println(envelopeGenSig0Decay);
     if (envelopeGenSig0Decay < 0.5f) {
 
       envelopeGenSig0Volume = 1.0f;
       // start to play with envelope, volume is 100%
       // if envelopeGenSig0Decay is at its minimum, disable envelope
-      if (envelopeGenSig0Decay < 0.1f) {
-        if (envelope0Enable == true) {
-          envelope0Enable = false;
-          Serial.println("Disable envelope 0");
-        }
-      } else {
-        envelopeGenSig0DecayFactor = envelopeGenSig0Decay * 2.0f;
-        if (envelope0Enable == false) {
-          envelope0Enable = true;
-          Serial.println("Enable envelope 0");
-        }
+      envelopeGenSig0DecayFactor = envelopeGenSig0Decay * 2.0f;
+      if (envelope0Enable == false) {
+        envelope0Enable = true;
+        Serial.println("Enable envelope 0");
       }
     } else {
+      if (envelope0Enable == true) {
+        envelope0Enable = false;
+        Serial.println("Disable envelope 0");
+      }
       // mean decay is at its max, start to play with volume
       envelopeGenSig0DecayFactor = 1.0f;
       // envelopeGenSig0Decay from 0.5 to 1
@@ -826,20 +880,16 @@ void analogsRead() {
 
       envelopeGenSig1Volume = 1.0f;
       // start to play with envelope, volume is 100%
-      // if envelopeGenSig1Decay is at its minimum, disable envelope
-      if (envelopeGenSig1Decay < 0.1f) {
-        if (envelope1Enable == true) {
-          envelope1Enable = false;
-          Serial.println("Disable envelope 1");
-        }
-      } else {
-        envelopeGenSig1DecayFactor = envelopeGenSig1Decay * 2.0f;
-        if (envelope1Enable == false) {
-          envelope1Enable = true;
-          Serial.println("Enable envelope 1");
-        }
+      envelopeGenSig1DecayFactor = envelopeGenSig1Decay * 2.0f;
+      if (envelope1Enable == false) {
+        envelope1Enable = true;
+        Serial.println("Enable envelope 1");
       }
     } else {
+      if (envelope1Enable == true) {
+        envelope1Enable = false;
+        Serial.println("Disable envelope 1");
+      }
       // mean decay is at its max, start to play with volume
       envelopeGenSig1DecayFactor = 1.0f;
       // envelopeGenSig1Decay from 0.5 to 1
@@ -1118,6 +1168,8 @@ void capacitiveStateMachine() {
 }
 
 void setComplexOscillatorFrequency(float frequency) {
+  Serial.print("setComplexOscillatorFrequency ");
+  Serial.println(frequency);
   complexOscBasis.SetFreq(frequency);
   complexOscBasis.SetSyncFreq(frequency);
   complexOscSinus.SetFreq(frequency);
@@ -1132,11 +1184,13 @@ void setPulserFrequency(float frequency) {
 
   if (frequency < 0.08f)
     frequency = 0.08;  //put 0.02 so overflow = 50000 --> which is 16 bits
+  pulserFrequency = frequency;
+  pulserPeriodSecond = 1 / pulserFrequency;
   //prescaler 16 bits, overflow 16bits
   timerPulser.setPrescaleFactor(40000);            // = Set prescaler to 4800 => timer frequency = 200MHz / 40000  = 5000 Hz
   timerPulser.setOverflow(int(5000 / frequency));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency
   timerPulser.refresh();                           // Make register changes take effect
-  timerPulser.resume();                            // Start
+
   pulserIncrement = frequency / sample_rate;
 }
 
@@ -1145,6 +1199,8 @@ void setClockFrequency(float frequency) {
   if (frequency < 0.04f)
     frequency = 0.04;  //put 0.01 so overflow = 50000 --> which is 16 bits
 
+  clockFrequency = frequency;
+  clockPeriodSecond = 1 / clockFrequency;
   //prescaler 16 bits, overflow 16bits
 
   //frequency *2 to make a 50% duty cycle square signal
@@ -1169,4 +1225,79 @@ void generateRandomVoltage() {
   randomVoltageValue = random(0, 1000) / 1000.0f;
   /*DEBUG_PRINT("random Voltage value ");
   DEBUG_PRINTLN(randomVoltageValue);*/
+}
+
+
+/*
+//Blue
+uint32_t sequencerColor = pixels.Color(0, 0, 120);
+uint32_t sequencerColorHighlighted = pixels.Color(0, 0, 255);
+//Yellow
+uint32_t pulserColor = pixels.Color(100, 100, 0);
+uint32_t pulserColorHighlighted = pixels.Color(200, 200, 0);
+//White
+uint32_t randomColor = pixels.Color(100, 100, 100);
+uint32_t randomColorHighlighted = pixels.Color(200, 200, 200);
+//Green
+uint32_t envelopesColor = pixels.Color(0, 120, 0);
+uint32_t envelopesColorHighlighted = pixels.Color(0, 255, 0);
+
+uint32_t noneColor = pixels.Color(0, 0, 0);
+
+#define SEQUENCER_LED TOTAL_TOUCH_COUNT + 1
+#define RANDOM_VOLTAGE_LED SEQUENCER_LED + 1
+#define PULSER_VOLTAGE_LED RANDOM_VOLTAGE_LED + 1
+#define ENVELOPE_VOLTAGE_LED PULSER_VOLTAGE_LED + 1
+*/
+void setSequencerLed(uint8_t ledIndex) {
+  static bool sequencerInvert = true;
+  uint8_t colorFactor = map(ledIndex, 0, 4, 20, 255);
+  sequencerInvert = !sequencerInvert;
+  uint32_t color;
+  if (sequencerInvert)
+    color = pixels.Color(0, 5, colorFactor);
+  else
+    color = pixels.Color(5, 0, colorFactor);
+
+  pixels.setPixelColor(SEQUENCER_LED, color);
+  pixels.show();
+}
+void setRandomLed(float randomVoltage) {
+  uint8_t colorFactor = fmap(randomVoltage, 50, 200);
+  pixels.setPixelColor(RANDOM_VOLTAGE_LED, pixels.Color(colorFactor, colorFactor, colorFactor));
+  pixels.show();
+}
+
+
+void setPulserLed(bool ledStatus) {
+  pulserLedStatus = ledStatus;
+  if (ledStatus)
+    pixels.setPixelColor(PULSER_VOLTAGE_LED, pulserColor);
+  else
+    pixels.setPixelColor(PULSER_VOLTAGE_LED, noneColor);
+  pixels.show();
+}
+void setEnvelopeLed(bool ledStatus) {
+  envolpeLedStatus = ledStatus;
+  if (ledStatus)
+    pixels.setPixelColor(ENVELOPE_VOLTAGE_LED, envelopesColorHighlighted);
+  else
+    pixels.setPixelColor(ENVELOPE_VOLTAGE_LED, noneColor);
+  pixels.show();
+}
+
+void updateTimedLeds() {
+  if (envolpeLedStatus)
+    envolpeLedCount++;
+  if (envolpeLedCount > LED_OFF_COUNT) {
+    envolpeLedCount = 0;
+    setEnvelopeLed(false);
+  }
+
+  if (pulserLedStatus)
+    pulserLedCount++;
+  if (pulserLedCount > LED_OFF_COUNT) {
+    pulserLedCount = 0;
+    setPulserLed(false);
+  }
 }
