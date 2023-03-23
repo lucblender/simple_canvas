@@ -101,7 +101,7 @@ float clockRate;
 float envelopeGenSig1Decay;
 int envelopeGenSlopeShape;
 float pulserPeriod;
-float modOscFrequency = 440.0f; //just in case we set frequency with it before it succeed to read the analog value, should never happen
+float modOscFrequency = 440.0f;  //just in case we set frequency with it before it succeed to read the analog value, should never happen
 float modOscWaveform;
 float modOscAttenuator;
 float complexOscTimbre;
@@ -515,14 +515,20 @@ void ProcessAudio(float **in, float **out, size_t size) {
 
     lowPassGateFilter0.SetFreq((sample_rate / 2) * (adsr0Value * adsr0Value));
     lowPassGateFilter1.SetFreq((sample_rate / 2) * (adsr1Value * adsr1Value));
+    
+    float modulatedComplexOscTimbre = computeModulatedComplexOscTimbre();
+    float modulatedModOscAttenuator = computeModulatedComplexOscAttenuator();
 
+    computeModulationOscWaveform();
     setModulationOscillatorFrequency();
+
     float modulationOscSample = modulationOsc.Process();
 
-    float attenuatedModulationOscSample = modulationOscSample * modOscAttenuator;
+    float attenuatedModulationOscSample = modulationOscSample * modulatedModOscAttenuator;
     float attenuatedComplexMixed;
 
-    if (modOscAttenuator > 0.1f) {
+
+    if (modulatedModOscAttenuator > 0.1f) {
       if (modOscAmFm == 0) {  //0 = AM
 
         // si attenuator = 0 --> signal sans modulation  signal = attenuatedComplexMixed
@@ -531,30 +537,31 @@ void ProcessAudio(float **in, float **out, size_t size) {
         //si attenuator = 0 --> signal
 
         // modulationOscSample oscillate -1..1
-        // modOscAttenuator 0..1 gain
+        // modulatedModOscAttenuator 0..1 gain
 
-        float gain = 1.0f - (((modulationOscSample + 1.0f) / 2) * modOscAttenuator);
+        float gain = 1.0f - (((modulationOscSample + 1.0f) / 2) * modulatedModOscAttenuator);
 
 
         setComplexOscillatorFrequency(0.0f);
+        computeModulationOscWaveform();
         float complexSinusSample = complexOscSinus.Process();
         float complexBasisSample = complexOscBasis.Process();
 
-        float complexMixed = (1.0 - complexOscTimbre) * complexSinusSample + complexOscTimbre * complexBasisSample;
+        float complexMixed = (1.0 - modulatedComplexOscTimbre) * complexSinusSample + modulatedComplexOscTimbre * complexBasisSample;
         attenuatedComplexMixed = complexMixed * complexOscAttenuator * gain;
       } else {  // 1 = FM
 
         // modulationOscSample oscillate -1..1
         //(modulationOscSample * 0.5f) -0.5 .. 0.5
-        // modOscAttenuator 0..1 gain
+        // modulatedModOscAttenuator 0..1 gain
         // fmFrequencyRamp --> example complexOscFrequency = 400hz --> 400 * 0.1 * ((-0.5..0.5)*0..1)
 
-        float fmModulationFactor = 0.5 * ((modulationOscSample)*modOscAttenuator);
+        float fmModulationFactor = 0.5 * ((modulationOscSample)*modulatedModOscAttenuator);
         setComplexOscillatorFrequency(fmModulationFactor);
         float complexSinusSample = complexOscSinus.Process();
         float complexBasisSample = complexOscBasis.Process();
 
-        float complexMixed = (1.0 - complexOscTimbre) * complexSinusSample + complexOscTimbre * complexBasisSample;
+        float complexMixed = (1.0 - modulatedComplexOscTimbre) * complexSinusSample + modulatedComplexOscTimbre * complexBasisSample;
 
         attenuatedComplexMixed = complexMixed * complexOscAttenuator;
       }
@@ -563,7 +570,7 @@ void ProcessAudio(float **in, float **out, size_t size) {
       float complexSinusSample = complexOscSinus.Process();
       float complexBasisSample = complexOscBasis.Process();
 
-      float complexMixed = (1.0 - complexOscTimbre) * complexSinusSample + complexOscTimbre * complexBasisSample;
+      float complexMixed = (1.0 - modulatedComplexOscTimbre) * complexSinusSample + modulatedComplexOscTimbre * complexBasisSample;
       attenuatedComplexMixed = complexMixed * complexOscAttenuator;
     }
 
@@ -834,21 +841,6 @@ void analogsRead() {
 
   if (avAnModoscWaveform.hasValueUpdated()) {
     modOscWaveform = simpleAnalogNormalize(avAnModoscWaveform.getVal());
-    if (modOscWaveform < 0.5) {
-      //from tirangle to sawtooth 0 = triangle 0.5 = sawtooth
-      // tirangle shape = 0, pw = 0.5
-      //sawtooth shape =  0, pw 1
-      modulationOsc.SetWaveshape(0.0f);  // 1 = square
-      modulationOsc.SetPW(1.0f - (0.5f - modOscWaveform));
-
-    } else {
-      //from sawtooth to square: 0.5 = sawtooth 1 = square
-      //sawtooth shape =  0, pw 1
-      //square shape = 1, pw = 0.5
-      modulationOsc.SetWaveshape((modOscWaveform - 0.5f) * 2);  // 1 = square
-      modulationOsc.SetPW(1.0f - (modOscWaveform - 0.5f));
-    }
-    modOscWaveformOld = modOscWaveform;
   }
 
 
@@ -1338,14 +1330,55 @@ void updateTimedLeds() {
   }
 }
 
+float computeModulatedComplexOscTimbre() {  //TODO, maybe make the outputComplexOscTimbre goes from complexOscTimbre up to 1.0 accoarding to modulationFactor
+  if (destinationPatches[OSC_A_TMBR] != NONE_SOURCE) {
+    float modulationFactor = getModulationFactorFromPatch(destinationPatches[OSC_A_TMBR]);
+    return modulationFactor;
+  } else {
+    return complexOscTimbre;
+  }
+}
+
+float computeModulatedComplexOscAttenuator(){//TODO, maybe make the outputComplexOscAttenuator goes from modOscAttenuator up to 1.0 accoarding to modulationFactor
+   if (destinationPatches[OSC_B_ATT] != NONE_SOURCE) {
+    float modulationFactor = getModulationFactorFromPatch(destinationPatches[OSC_B_ATT]);
+    return modulationFactor;
+  } else {
+    return modOscAttenuator;
+  }
+}
+
+void computeModulationOscWaveform() {
+  float computedModOscWaveform;
+
+  if (destinationPatches[OSC_B_FORM] != NONE_SOURCE) {//TODO, maybe make the computedModOscWaveform goes from modOscWaveform up to 1.0 accoarding to modulationFactor
+    computedModOscWaveform = getModulationFactorFromPatch(destinationPatches[OSC_B_FORM]);
+  } else {
+    computedModOscWaveform = modOscWaveform;
+  }
+
+  if (computedModOscWaveform < 0.5) {
+    //from tirangle to sawtooth 0 = triangle 0.5 = sawtooth
+    // tirangle shape = 0, pw = 0.5
+    //sawtooth shape =  0, pw 1
+    modulationOsc.SetWaveshape(0.0f);  // 1 = square
+    modulationOsc.SetPW(1.0f - (0.5f - computedModOscWaveform));
+
+  } else {
+    //from sawtooth to square: 0.5 = sawtooth 1 = square
+    //sawtooth shape =  0, pw 1
+    //square shape = 1, pw = 0.5
+    modulationOsc.SetWaveshape((computedModOscWaveform - 0.5f) * 2);  // 1 = square
+    modulationOsc.SetPW(1.0f - (computedModOscWaveform - 0.5f));
+  }
+}
+
 float getModulationFactorFromPatch(int8_t patchValue) {
   switch (patchValue) {
     case NONE_SOURCE:
       return 0.0f;
-
     case SEQUENCER:
       return sequencerValue;
-
     case PULSER:
       return pulserValue;
     case RANDOM:
