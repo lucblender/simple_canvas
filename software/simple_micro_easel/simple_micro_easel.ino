@@ -1236,9 +1236,9 @@ void setClockFrequency(float frequency) {
 }
 
 void pulserProcess() {
-  if (pulserTriggerSource == CLOCK_TRIGGER)
+  if (pulserTriggerSource == CLOCK_TRIGGER || pulserTriggerSource == SEQ_CLOCK_TRIGGER)
     pulserValue -= clockIncrement;
-  else if (pulserTriggerSource == PULSER_TRIGGER)
+  else if (pulserTriggerSource == PULSER_TRIGGER || pulserTriggerSource == SEQ_PULSER_TRIGGER)
     pulserValue -= pulserIncrement;
   if (pulserValue < 0.0f)
     pulserValue = 0.0f;
