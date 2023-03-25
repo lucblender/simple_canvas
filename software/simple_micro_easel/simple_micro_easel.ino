@@ -128,21 +128,14 @@ bool envelope0Enable = true;
 bool envelope1Enable = true;
 
 // ditial pins value
-uint8_t sequencerStep4 = 0;
-uint8_t sequencerStep3 = 0;
-uint8_t sequencerStep2 = 0;
-uint8_t sequencerStep1 = 0;
-uint8_t sequencerStep0 = 0;
+uint8_t sequencerSteps[5] = { 0, 0, 0, 0, 0 };
 
-uint8_t sequencerStep4Old = DEFAULT_VALUE;
-uint8_t sequencerStep3Old = DEFAULT_VALUE;
-uint8_t sequencerStep2Old = DEFAULT_VALUE;
-uint8_t sequencerStep1Old = DEFAULT_VALUE;
-uint8_t sequencerStep0Old = DEFAULT_VALUE;
+uint8_t sequencerStepsOld[5] = { DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE, DEFAULT_VALUE };
 
 uint8_t sequencerLenght = 5;
 uint8_t sequencerIndex = 0;
 float sequencerValue = 0;
+bool currentSequencerStepEnable = true;
 
 // mcp pins value
 uint8_t sequencerTrigger = 0;
@@ -197,7 +190,9 @@ MultiShapeAdsr multiShapeAdsr1;
 #define TOTAL_TOUCH_COUNT (INPUT_TOUCH_COUNT + OUTPUT_TOUCH_COUNT)
 
 enum TRIGGER_SOURCE { PULSER_TRIGGER = 0,
-                      CLOCK_TRIGGER = 1 };
+                      CLOCK_TRIGGER = 1,
+                      SEQ_PULSER_TRIGGER = 2,
+                      SEQ_CLOCK_TRIGGER = 3 };
 
 uint8_t sequencerTriggerSource = PULSER_TRIGGER;
 uint8_t randomVoltageTriggerSource = PULSER_TRIGGER;
@@ -296,6 +291,9 @@ float pulserPeriodSecond = 0.0f;
 float clockFrequency = 0.0f;
 float clockPeriodSecond = 0.0f;
 
+bool skipNextPulser = false;
+bool skipNextClock = false;
+
 float randomVoltageValue = 0.0f;
 float adsr0Value = 0.0f;
 float adsr1Value = 0.0f;
@@ -304,67 +302,87 @@ float clockIncrement = 0.0f;
 float clockValue = 0.0f;
 
 void OnTimerClockInterrupt() {
-  if (clockValue == 0.0f) {
-    clockValue = 1.0f;
-    if (pulserTriggerSource == CLOCK_TRIGGER) {
-      pulserValue = 1.0f;
-      setPulserLed(true);
-    }
-    if (randomVoltageTriggerSource == CLOCK_TRIGGER) {
-      generateRandomVoltage();
-      setRandomLed(randomVoltageValue);
-    }
-    if (sequencerTriggerSource == CLOCK_TRIGGER) {
-      sequencerCurrentStepRead();
-      sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
-      setSequencerLed(sequencerIndex);
-    }
-    if (envelopeGenSig0TriggerSource == CLOCK_TRIGGER) {
-      multiShapeAdsr0.setReleaseTime(clockPeriodSecond * envelopeGenSig0DecayFactor * 1.2f);
-      multiShapeAdsr0.retrigger();
-    }
-    if (envelopeGenSig1TriggerSource == CLOCK_TRIGGER) {
+  if (skipNextClock == false) {
+    if (clockValue == 0.0f) {
+      if (sequencerTriggerSource == SEQ_CLOCK_TRIGGER) {
+        sequencerCurrentStepRead();
+        sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
+        if (sequencerSteps[sequencerIndex] == 1)
+          currentSequencerStepEnable = true;
+        else
+          currentSequencerStepEnable = false;
+        setSequencerLed(sequencerIndex);
+      }
+      clockValue = 1.0f;
 
-      multiShapeAdsr1.setReleaseTime(clockPeriodSecond * envelopeGenSig1DecayFactor * 1.2f);
-      multiShapeAdsr1.retrigger();
-      setEnvelopeLed(true);
+      if (pulserTriggerSource == CLOCK_TRIGGER || (pulserTriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
+        pulserValue = 1.0f;
+        setPulserLed(true);
+      }
+      if (randomVoltageTriggerSource == CLOCK_TRIGGER || (randomVoltageTriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
+        generateRandomVoltage();
+        setRandomLed(randomVoltageValue);
+      }
+      if (envelopeGenSig0TriggerSource == CLOCK_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
+        multiShapeAdsr0.setReleaseTime(clockPeriodSecond * envelopeGenSig0DecayFactor * 1.2f);
+        multiShapeAdsr0.retrigger();
+      }
+      if (envelopeGenSig1TriggerSource == CLOCK_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
+
+        multiShapeAdsr1.setReleaseTime(clockPeriodSecond * envelopeGenSig1DecayFactor * 1.2f);
+        multiShapeAdsr1.retrigger();
+        setEnvelopeLed(true);
+      }
+    } else {
+      clockValue = 0.0f;
+    }
+
+    if (avAnClockRate.hasValueUpdated()) {
+      clockRate = simpleAnalogNormalize(avAnClockRate.getVal()) * 3.0f;  //0..3Hz = 0..180 bpm
+      skipNextClock = true;                                              // when we reset the timer, it will trigger the interrupt directly, so we need to skip it once
+      setClockFrequency(clockRate);
     }
   } else {
-    clockValue = 0.0f;
-  }
-
-  if (avAnClockRate.hasValueUpdated()) {
-    clockRate = simpleAnalogNormalize(avAnClockRate.getVal()) * 3.0f;  //0..3Hz = 0..180 bpm
-    setClockFrequency(clockRate);
+    skipNextClock = false;
   }
 }
 
 void OnTimerPulserInterrupt() {
-  if (pulserTriggerSource == PULSER_TRIGGER) {
-    pulserValue = 1.0f;
-    setPulserLed(true);
-  }
-  if (randomVoltageTriggerSource == PULSER_TRIGGER) {
-    generateRandomVoltage();
-    setRandomLed(randomVoltageValue);
-  }
-  if (sequencerTriggerSource == PULSER_TRIGGER) {
-    sequencerCurrentStepRead();
-    sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
-    setSequencerLed(sequencerIndex);
-  }
-  if (envelopeGenSig0TriggerSource == PULSER_TRIGGER) {
-    multiShapeAdsr0.setReleaseTime(pulserPeriodSecond * envelopeGenSig0DecayFactor * 1.2f);
-    multiShapeAdsr0.retrigger();
-  }
-  if (envelopeGenSig1TriggerSource == PULSER_TRIGGER) {
-    multiShapeAdsr1.setReleaseTime(pulserPeriodSecond * envelopeGenSig1DecayFactor * 1.2f);
-    multiShapeAdsr1.retrigger();
-    setEnvelopeLed(true);
-  }
-  if (avAnPulserPeriod.hasValueUpdated()) {
-    pulserPeriod = simpleAnalogNormalize(avAnPulserPeriod.getVal()) * 4.0f;  //0..4Hz = 0..240 bpm
-    setPulserFrequency(pulserPeriod);
+  if (skipNextPulser == false) {
+    if (sequencerTriggerSource == SEQ_PULSER_TRIGGER) {
+      sequencerCurrentStepRead();
+      sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
+      if (sequencerSteps[sequencerIndex] == 1)
+        currentSequencerStepEnable = false;
+      else
+        currentSequencerStepEnable = true;
+      setSequencerLed(sequencerIndex);
+    }
+
+    if (pulserTriggerSource == PULSER_TRIGGER || (pulserTriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
+      pulserValue = 1.0f;
+      setPulserLed(true);
+    }
+    if (randomVoltageTriggerSource == PULSER_TRIGGER || (randomVoltageTriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
+      generateRandomVoltage();
+      setRandomLed(randomVoltageValue);
+    }
+    if (envelopeGenSig0TriggerSource == PULSER_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
+      multiShapeAdsr0.setReleaseTime(pulserPeriodSecond * envelopeGenSig0DecayFactor * 1.2f);
+      multiShapeAdsr0.retrigger();
+    }
+    if (envelopeGenSig1TriggerSource == PULSER_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
+      multiShapeAdsr1.setReleaseTime(pulserPeriodSecond * envelopeGenSig1DecayFactor * 1.2f);
+      multiShapeAdsr1.retrigger();
+      setEnvelopeLed(true);
+    }
+    if (avAnPulserPeriod.hasValueUpdated()) {
+      pulserPeriod = simpleAnalogNormalize(avAnPulserPeriod.getVal()) * 4.0f;  //0..4Hz = 0..240 bpm
+      skipNextPulser = true;                                                   // when we reset the timer, it will trigger the interrupt directly, so we need to skip it once
+      setPulserFrequency(pulserPeriod);
+    }
+  } else {
+    skipNextPulser = false;
   }
 }
 
@@ -515,9 +533,7 @@ void ProcessAudio(float **in, float **out, size_t size) {
       float factorSig0Adsr = 1.0f - offsetSig0Adsr;
 
       attenuatedAdsr0Value = offsetSig0Adsr + adsr0Value * factorSig0Adsr;
-    }
-    else
-    {
+    } else {
       attenuatedAdsr0Value = adsr0Value;
     }
 
@@ -633,38 +649,17 @@ void ProcessAudio(float **in, float **out, size_t size) {
 }
 
 void digitalPinsread() {
-  sequencerStep0 = digitalRead(DI_SEQUENCER_STEP0);
-  sequencerStep1 = digitalRead(DI_SEQUENCER_STEP1);
-  sequencerStep2 = digitalRead(DI_SEQUENCER_STEP2);
-  sequencerStep3 = digitalRead(DI_SEQUENCER_STEP3);
-  sequencerStep4 = digitalRead(DI_SEQUENCER_STEP4);
+  sequencerSteps[0] = digitalRead(DI_SEQUENCER_STEP0);
+  sequencerSteps[1] = digitalRead(DI_SEQUENCER_STEP1);
+  sequencerSteps[2] = digitalRead(DI_SEQUENCER_STEP2);
+  sequencerSteps[3] = digitalRead(DI_SEQUENCER_STEP3);
+  sequencerSteps[4] = digitalRead(DI_SEQUENCER_STEP4);
 
-  if (sequencerStep0Old != sequencerStep0) {  //0 disabled 1 enabled
-    Serial.print("sequencerStep0 ");
-    Serial.println(sequencerStep0);
-  };
-  if (sequencerStep1Old != sequencerStep1) {  //0 disabled 1 enabled
-    Serial.print("sequencerStep1 ");
-    Serial.println(sequencerStep1);
-  };
-  if (sequencerStep2Old != sequencerStep2) {  //0 disabled 1 enabled
-    Serial.print("sequencerStep2 ");
-    Serial.println(sequencerStep2);
-  };
-  if (sequencerStep3Old != sequencerStep3) {  //0 disabled 1 enabled
-    Serial.print("sequencerStep3 ");
-    Serial.println(sequencerStep3);
-  };
-  if (sequencerStep4Old != sequencerStep4) {  //0 disabled 1 enabled
-    Serial.print("sequencerStep4 ");
-    Serial.println(sequencerStep4);
-  };
-
-  sequencerStep0Old = sequencerStep0;
-  sequencerStep1Old = sequencerStep1;
-  sequencerStep2Old = sequencerStep2;
-  sequencerStep3Old = sequencerStep3;
-  sequencerStep4Old = sequencerStep4;
+  for (int i = 0; i < 5; i++) {
+    if (sequencerStepsOld[i] != sequencerSteps[i]) {  //1 disabled 0 enabled
+      sequencerStepsOld[0] = sequencerSteps[i];
+    };
+  }
 }
 
 void mcpPinsRead() {
@@ -683,9 +678,9 @@ void mcpPinsRead() {
     Serial.print("sequencerTrigger ");
     Serial.println(sequencerTrigger);
     if (sequencerTrigger == 0)
-      sequencerTriggerSource = CLOCK_TRIGGER;
+      sequencerTriggerSource = SEQ_CLOCK_TRIGGER;
     else
-      sequencerTriggerSource = PULSER_TRIGGER;
+      sequencerTriggerSource = SEQ_PULSER_TRIGGER;
 
     if (pulserTriggerSelect == 1)
       pulserTriggerSource = sequencerTriggerSource;
@@ -1003,11 +998,6 @@ void sequencerCurrentStepRead() {
   //Prepare for next sequential voltage source
   pinMode(DI_SEQUENCER_STEPSELECT[nextSequencerIndex], OUTPUT);
   digitalWrite(DI_SEQUENCER_STEPSELECT[nextSequencerIndex], 1);
-
-  DEBUG_PRINT("Read step ");
-  DEBUG_PRINT(sequencerIndex);
-  DEBUG_PRINT(" : ");
-  DEBUG_PRINTLN(sequencerValue);
 }
 
 float semitone_to_hertz(int8_t note_number) {
@@ -1287,16 +1277,20 @@ void setSequencerLed(uint8_t ledIndex) {
   uint8_t colorFactor = map(ledIndex, 0, 4, 20, 255);
   sequencerInvert = !sequencerInvert;
   uint32_t color;
-  if (sequencerInvert)
-    color = pixels.Color(0, 5, colorFactor);
-  else
-    color = pixels.Color(5, 0, colorFactor);
+  if (currentSequencerStepEnable) {
+    if (sequencerInvert)
+      color = pixels.Color(0, 5, colorFactor);
+    else
+      color = pixels.Color(5, 0, colorFactor);
+  } else {
+    color = noneColor;
+  }
 
   pixels.setPixelColor(SEQUENCER_LED, color);
   pixels.show();
 }
 void setRandomLed(float randomVoltage) {
-  uint8_t colorFactor = fmap(randomVoltage, 50, 200);
+  uint8_t colorFactor = fmap(randomVoltage, 5, 200);
   pixels.setPixelColor(RANDOM_VOLTAGE_LED, pixels.Color(colorFactor, colorFactor, colorFactor));
   pixels.show();
 }
@@ -1327,8 +1321,9 @@ void updateTimedLeds() {
     setEnvelopeLed(false);
   }
 
-  if (pulserLedStatus)
+  if (pulserLedStatus) {
     pulserLedCount++;
+  }
   if (pulserLedCount > LED_OFF_COUNT) {
     pulserLedCount = 0;
     setPulserLed(false);
@@ -1338,16 +1333,16 @@ void updateTimedLeds() {
 float computeModulatedComplexOscTimbre() {
   if (destinationPatches[OSC_A_TMBR] != NONE_SOURCE) {
     float modulationFactor = getModulationFactorFromPatch(destinationPatches[OSC_A_TMBR]);
-    return modulationFactor*complexOscTimbre;
+    return modulationFactor * complexOscTimbre;
   } else {
     return complexOscTimbre;
   }
 }
 
-float computeModulatedComplexOscAttenuator() { 
+float computeModulatedComplexOscAttenuator() {
   if (destinationPatches[OSC_B_ATT] != NONE_SOURCE) {
     float modulationFactor = getModulationFactorFromPatch(destinationPatches[OSC_B_ATT]);
-    return modulationFactor*modOscAttenuator;
+    return modulationFactor * modOscAttenuator;
   } else {
     return modOscAttenuator;
   }
@@ -1357,7 +1352,7 @@ void computeModulationOscWaveform() {
   float computedModOscWaveform;
 
   if (destinationPatches[OSC_B_FORM] != NONE_SOURCE) {  //TODO, maybe make the computedModOscWaveform goes from modOscWaveform up to 1.0 accoarding to modulationFactor
-    computedModOscWaveform = getModulationFactorFromPatch(destinationPatches[OSC_B_FORM])*modOscWaveform;
+    computedModOscWaveform = getModulationFactorFromPatch(destinationPatches[OSC_B_FORM]) * modOscWaveform;
   } else {
     computedModOscWaveform = modOscWaveform;
   }
