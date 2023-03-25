@@ -100,7 +100,7 @@ float sequencerStepAnalogIn[5];
 float clockRate;
 float envelopeGenSig1Decay;
 int envelopeGenSlopeShape;
-float pulserPeriod;
+float pulserPeriod = 3.0f;
 float modOscFrequency = 440.0f;  //just in case we set frequency with it before it succeed to read the analog value, should never happen
 float modOscWaveform;
 float modOscAttenuator;
@@ -254,18 +254,18 @@ int8_t outputPressedIndex;
 
 #define LED_OFF_COUNT 4
 //TOTAL_TOUCH_COUNT = 9
-#define SEQUENCER_LED TOTAL_TOUCH_COUNT
-#define RANDOM_VOLTAGE_LED SEQUENCER_LED + 1
-#define PULSER_VOLTAGE_LED RANDOM_VOLTAGE_LED + 1
-#define ENVELOPE_VOLTAGE_LED PULSER_VOLTAGE_LED + 1
+#define ENVELOPE_VOLTAGE_LED TOTAL_TOUCH_COUNT
+#define PULSER_VOLTAGE_LED ENVELOPE_VOLTAGE_LED + 1
+#define RANDOM_VOLTAGE_LED PULSER_VOLTAGE_LED + 1
+#define SEQUENCER_LED RANDOM_VOLTAGE_LED + 1
 bool envolpeLedStatus = false;
 bool pulserLedStatus = false;
 uint32_t envolpeLedCount = 0;
 uint32_t pulserLedCount = 0;
 
-#define NUMPIXELS ENVELOPE_VOLTAGE_LED + 1
+#define NUMPIXELS SEQUENCER_LED + 1
 
-Adafruit_NeoPixel pixels(NUMPIXELS, DI_LEDS_DIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel pixels(NUMPIXELS, DI_LEDS_DIN, NEO_GRBW + NEO_KHZ800);
 
 //Blue
 uint32_t sequencerColor = pixels.Color(0, 0, 120);
@@ -320,26 +320,22 @@ void OnTimerClockInterrupt() {
       setSequencerLed(sequencerIndex);
     }
     if (envelopeGenSig0TriggerSource == CLOCK_TRIGGER) {
-      if (envelopeGenSig0DecayFactor > 0.75f) {
-        multiShapeAdsr0.setAttackStartReleaseEndLevel(1.0f - (4.0f * (1.0f - envelopeGenSig0DecayFactor)));
-      } else {
-        multiShapeAdsr0.setAttackStartReleaseEndLevel(0.0f);
-      }
       multiShapeAdsr0.setReleaseTime(clockPeriodSecond * envelopeGenSig0DecayFactor * 1.2f);
       multiShapeAdsr0.retrigger();
     }
     if (envelopeGenSig1TriggerSource == CLOCK_TRIGGER) {
-      if (envelopeGenSig1DecayFactor > 0.75f) {
-        multiShapeAdsr1.setAttackStartReleaseEndLevel(1.0f - (4.0f * (1.0f - envelopeGenSig1DecayFactor)));
-      } else {
-        multiShapeAdsr1.setAttackStartReleaseEndLevel(0.0f);
-      }
+
       multiShapeAdsr1.setReleaseTime(clockPeriodSecond * envelopeGenSig1DecayFactor * 1.2f);
       multiShapeAdsr1.retrigger();
       setEnvelopeLed(true);
     }
   } else {
     clockValue = 0.0f;
+  }
+
+  if (avAnClockRate.hasValueUpdated()) {
+    clockRate = simpleAnalogNormalize(avAnClockRate.getVal()) * 3.0f;  //0..3Hz = 0..180 bpm
+    setClockFrequency(clockRate);
   }
 }
 
@@ -358,23 +354,17 @@ void OnTimerPulserInterrupt() {
     setSequencerLed(sequencerIndex);
   }
   if (envelopeGenSig0TriggerSource == PULSER_TRIGGER) {
-    if (envelopeGenSig0DecayFactor > 0.75f) {
-      multiShapeAdsr0.setAttackStartReleaseEndLevel(1.0f - (4.0f * (1.0f - envelopeGenSig0DecayFactor)));
-    } else {
-      multiShapeAdsr0.setAttackStartReleaseEndLevel(0.0f);
-    }
     multiShapeAdsr0.setReleaseTime(pulserPeriodSecond * envelopeGenSig0DecayFactor * 1.2f);
     multiShapeAdsr0.retrigger();
   }
   if (envelopeGenSig1TriggerSource == PULSER_TRIGGER) {
-    if (envelopeGenSig1DecayFactor > 0.75f) {
-      multiShapeAdsr1.setAttackStartReleaseEndLevel(1.0f - (4.0f * (1.0f - envelopeGenSig1DecayFactor)));
-    } else {
-      multiShapeAdsr1.setAttackStartReleaseEndLevel(0.0f);
-    }
     multiShapeAdsr1.setReleaseTime(pulserPeriodSecond * envelopeGenSig1DecayFactor * 1.2f);
     multiShapeAdsr1.retrigger();
     setEnvelopeLed(true);
+  }
+  if (avAnPulserPeriod.hasValueUpdated()) {
+    pulserPeriod = simpleAnalogNormalize(avAnPulserPeriod.getVal()) * 4.0f;  //0..4Hz = 0..240 bpm
+    setPulserFrequency(pulserPeriod);
   }
 }
 
@@ -512,10 +502,41 @@ void ProcessAudio(float **in, float **out, size_t size) {
     adsr0Value = multiShapeAdsr0.Process(false);  // for now there is no gate so we will only have adr
     adsr1Value = multiShapeAdsr1.Process(false);  // for now there is no gate so we will only have adr
 
+    // we have attenuated Adsr Value to have a smooth transition between adsr to no adsr
+    // those attenuated adsr are only for the lpg and vca, for the patch the non attenuated adsr value is used
+    float attenuatedAdsr0Value;
+    float attenuatedAdsr1Value;
 
-    lowPassGateFilter0.SetFreq((sample_rate / 2) * (adsr0Value * adsr0Value));
-    lowPassGateFilter1.SetFreq((sample_rate / 2) * (adsr1Value * adsr1Value));
-    
+    if (envelopeGenSig0DecayFactor > 0.75f) {
+      // envelopeGenSig0DecayFactor 0.75 .. 1
+      // offsetSig0Adsr 0 .. 1
+      // factorSig0Adsr 1 .. 0
+      float offsetSig0Adsr = 1.0f - (4.0f * (1.0f - envelopeGenSig0DecayFactor));
+      float factorSig0Adsr = 1.0f - offsetSig0Adsr;
+
+      attenuatedAdsr0Value = offsetSig0Adsr + adsr0Value * factorSig0Adsr;
+    }
+    else
+    {
+      attenuatedAdsr0Value = adsr0Value;
+    }
+
+    if (envelopeGenSig1DecayFactor > 0.75f) {
+      // envelopeGenSig1DecayFactor 0.75 .. 1
+      // offsetSig1Adsr 0 .. 1
+      // factorSig1Adsr 1 .. 0
+      float offsetSig1Adsr = 1.0f - (4.0f * (1.0f - envelopeGenSig1DecayFactor));
+      float factorSig1Adsr = 1.0f - offsetSig1Adsr;
+
+      attenuatedAdsr1Value = offsetSig1Adsr + adsr1Value * factorSig1Adsr;
+    }
+    {
+      attenuatedAdsr1Value = adsr1Value;
+    }
+
+    lowPassGateFilter0.SetFreq((sample_rate / 2) * (attenuatedAdsr0Value * attenuatedAdsr0Value));
+    lowPassGateFilter1.SetFreq((sample_rate / 2) * (attenuatedAdsr1Value * attenuatedAdsr1Value));
+
     float modulatedComplexOscTimbre = computeModulatedComplexOscTimbre();
     float modulatedModOscAttenuator = computeModulatedComplexOscAttenuator();
 
@@ -584,7 +605,7 @@ void ProcessAudio(float **in, float **out, size_t size) {
         attenuatedComplexMixed = lpgComplexMixed;
       } else  //VCA
       {
-        attenuatedComplexMixed = attenuatedComplexMixed * adsr0Value;
+        attenuatedComplexMixed = attenuatedComplexMixed * attenuatedAdsr0Value;
       }
     }
     attenuatedComplexMixed = attenuatedComplexMixed * envelopeGenSig0Volume;
@@ -599,20 +620,12 @@ void ProcessAudio(float **in, float **out, size_t size) {
           attenuatedComplexMixed = attenuatedComplexMixed + lpgModulationMixed * envelopeGenSig1Volume;
         } else  //VCA
         {
-          attenuatedComplexMixed = attenuatedComplexMixed + (modulationOscSample * envelopeGenSig1Volume * adsr1Value);
+          attenuatedComplexMixed = attenuatedComplexMixed + (modulationOscSample * envelopeGenSig1Volume * attenuatedAdsr1Value);
         }
 
       } else
         attenuatedComplexMixed = attenuatedComplexMixed + (modulationOscSample * envelopeGenSig1Volume);
     }
-
-
-
-
-
-
-
-
 
     out[0][i] = attenuatedComplexMixed;
     out[1][i] = attenuatedComplexMixed;
@@ -823,16 +836,6 @@ void analogsRead() {
 
   if (avAnComplexoscFrequency.hasValueUpdated()) {  //TODO make this better
     complexOscFrequency = fmap(simpleAnalogNormalize(avAnComplexoscFrequency.getFVal()), 0, 8000, Mapping::EXP);
-  }
-
-  if (avAnPulserPeriod.hasValueUpdated()) {
-    pulserPeriod = simpleAnalogNormalize(avAnPulserPeriod.getVal()) * 4.0f;  //0..4Hz = 0..240 bpm
-    setPulserFrequency(pulserPeriod);
-  }
-
-  if (avAnClockRate.hasValueUpdated()) {
-    clockRate = simpleAnalogNormalize(avAnClockRate.getVal()) * 3.0f;  //0..3Hz = 0..180 bpm
-    setClockFrequency(clockRate);
   }
 
   if (avAnModoscFrequency.hasValueUpdated()) {  //TODO make this better
@@ -1212,6 +1215,8 @@ void setPulserFrequency(float frequency) {
 
   if (frequency < 0.08f)
     frequency = 0.08;  //put 0.02 so overflow = 50000 --> which is 16 bits
+  Serial.print("puser frequency : ");
+  Serial.println(frequency);
   pulserFrequency = frequency;
   pulserPeriodSecond = 1 / pulserFrequency;
   //prescaler 16 bits, overflow 16bits
@@ -1330,19 +1335,19 @@ void updateTimedLeds() {
   }
 }
 
-float computeModulatedComplexOscTimbre() {  //TODO, maybe make the outputComplexOscTimbre goes from complexOscTimbre up to 1.0 accoarding to modulationFactor
+float computeModulatedComplexOscTimbre() {
   if (destinationPatches[OSC_A_TMBR] != NONE_SOURCE) {
     float modulationFactor = getModulationFactorFromPatch(destinationPatches[OSC_A_TMBR]);
-    return modulationFactor;
+    return modulationFactor*complexOscTimbre;
   } else {
     return complexOscTimbre;
   }
 }
 
-float computeModulatedComplexOscAttenuator(){//TODO, maybe make the outputComplexOscAttenuator goes from modOscAttenuator up to 1.0 accoarding to modulationFactor
-   if (destinationPatches[OSC_B_ATT] != NONE_SOURCE) {
+float computeModulatedComplexOscAttenuator() { 
+  if (destinationPatches[OSC_B_ATT] != NONE_SOURCE) {
     float modulationFactor = getModulationFactorFromPatch(destinationPatches[OSC_B_ATT]);
-    return modulationFactor;
+    return modulationFactor*modOscAttenuator;
   } else {
     return modOscAttenuator;
   }
@@ -1351,8 +1356,8 @@ float computeModulatedComplexOscAttenuator(){//TODO, maybe make the outputComple
 void computeModulationOscWaveform() {
   float computedModOscWaveform;
 
-  if (destinationPatches[OSC_B_FORM] != NONE_SOURCE) {//TODO, maybe make the computedModOscWaveform goes from modOscWaveform up to 1.0 accoarding to modulationFactor
-    computedModOscWaveform = getModulationFactorFromPatch(destinationPatches[OSC_B_FORM]);
+  if (destinationPatches[OSC_B_FORM] != NONE_SOURCE) {  //TODO, maybe make the computedModOscWaveform goes from modOscWaveform up to 1.0 accoarding to modulationFactor
+    computedModOscWaveform = getModulationFactorFromPatch(destinationPatches[OSC_B_FORM])*modOscWaveform;
   } else {
     computedModOscWaveform = modOscWaveform;
   }
