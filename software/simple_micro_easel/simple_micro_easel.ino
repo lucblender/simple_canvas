@@ -306,12 +306,12 @@ void OnTimerClockInterrupt() {
     if (clockValue == 0.0f) {
       if (sequencerTriggerSource == SEQ_CLOCK_TRIGGER) {
         sequencerCurrentStepRead();
-        sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
         if (sequencerSteps[sequencerIndex] == 1)
-          currentSequencerStepEnable = true;
-        else
           currentSequencerStepEnable = false;
+        else
+          currentSequencerStepEnable = true;
         setSequencerLed(sequencerIndex);
+        sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
       }
       clockValue = 1.0f;
 
@@ -351,12 +351,12 @@ void OnTimerPulserInterrupt() {
   if (skipNextPulser == false) {
     if (sequencerTriggerSource == SEQ_PULSER_TRIGGER) {
       sequencerCurrentStepRead();
-      sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
       if (sequencerSteps[sequencerIndex] == 1)
         currentSequencerStepEnable = false;
       else
         currentSequencerStepEnable = true;
       setSequencerLed(sequencerIndex);
+      sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
     }
 
     if (pulserTriggerSource == PULSER_TRIGGER || (pulserTriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
@@ -471,8 +471,8 @@ void setup() {
 
   // init adsr
   multiShapeAdsr0.Init(sample_rate, false);  //true = adsr, false = ar
-  multiShapeAdsr0.setAttackTime(0.1);
-  multiShapeAdsr0.setReleaseTime(0.1);
+  multiShapeAdsr0.setAttackTime(0.05);
+  multiShapeAdsr0.setReleaseTime(0.05);
   multiShapeAdsr0.setAttackShape(LINEAR_SHAPE);
   multiShapeAdsr0.setDecayShape(LINEAR_SHAPE);
   multiShapeAdsr0.setReleaseShape(LINEAR_SHAPE);
@@ -493,7 +493,6 @@ void setup() {
   lowPassGateFilter0.SetFreq(sample_rate);
   lowPassGateFilter1.Init(sample_rate);
   lowPassGateFilter1.SetFreq(sample_rate);
-
 
   //read onces all gpios before starting daisy
   digitalPinsread();
