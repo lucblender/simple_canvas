@@ -168,6 +168,8 @@ Adafruit_MCP23X17 mcp;
 static Oscillator complexOscSinus;
 static VariableShapeOscillator complexOscBasis;
 
+static Chorus chorus;
+
 static VariableShapeOscillator pulserOsc;
 
 static VariableShapeOscillator modulationOsc;
@@ -263,13 +265,13 @@ uint32_t pulserLedCount = 0;
 Adafruit_NeoPixel pixels(NUMPIXELS, DI_LEDS_DIN, NEO_GRBW + NEO_KHZ800);
 
 //Blue
-uint32_t sequencerColor = pixels.Color(0, 0, 120);
+uint32_t sequencerColor = pixels.Color(0, 0, 100);
 uint32_t sequencerColorHighlighted = pixels.Color(0, 0, 255);
 //Yellow
 uint32_t pulserColor = pixels.Color(100, 100, 0);
 uint32_t pulserColorHighlighted = pixels.Color(200, 200, 0);
 //White
-uint32_t randomColor = pixels.Color(100, 100, 100);
+uint32_t randomColor = pixels.Color(70, 70, 70);
 uint32_t randomColorHighlighted = pixels.Color(200, 200, 200);
 //Green
 uint32_t envelopesColor = pixels.Color(0, 120, 0);
@@ -324,12 +326,15 @@ void OnTimerClockInterrupt() {
         setRandomLed(randomVoltageValue);
       }
       if (envelopeGenSig0TriggerSource == CLOCK_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
-        multiShapeAdsr0.setReleaseTime(clockPeriodSecond * envelopeGenSig0DecayFactor * 1.2f);
+
+        multiShapeAdsr0.setAttackTime(0.05f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
+        multiShapeAdsr0.setReleaseTime(clockPeriodSecond * envelopeGenSig0DecayFactor);
         multiShapeAdsr0.retrigger();
       }
       if (envelopeGenSig1TriggerSource == CLOCK_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
 
-        multiShapeAdsr1.setReleaseTime(clockPeriodSecond * envelopeGenSig1DecayFactor * 1.2f);
+        multiShapeAdsr1.setAttackTime(0.05f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
+        multiShapeAdsr1.setReleaseTime(clockPeriodSecond * envelopeGenSig1DecayFactor);
         multiShapeAdsr1.retrigger();
         setEnvelopeLed(true);
       }
@@ -368,11 +373,13 @@ void OnTimerPulserInterrupt() {
       setRandomLed(randomVoltageValue);
     }
     if (envelopeGenSig0TriggerSource == PULSER_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
-      multiShapeAdsr0.setReleaseTime(pulserPeriodSecond * envelopeGenSig0DecayFactor * 1.2f);
+      multiShapeAdsr0.setAttackTime(0.05f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
+      multiShapeAdsr0.setReleaseTime(pulserPeriodSecond * envelopeGenSig0DecayFactor);
       multiShapeAdsr0.retrigger();
     }
     if (envelopeGenSig1TriggerSource == PULSER_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
-      multiShapeAdsr1.setReleaseTime(pulserPeriodSecond * envelopeGenSig1DecayFactor * 1.2f);
+      multiShapeAdsr1.setAttackTime(0.05f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
+      multiShapeAdsr1.setReleaseTime(pulserPeriodSecond * envelopeGenSig1DecayFactor);
       multiShapeAdsr1.retrigger();
       setEnvelopeLed(true);
     }
@@ -480,7 +487,7 @@ void setup() {
   // multiShapeAdsr0.setSustainLevel(.7); //uncomment if adsr and not just ar
 
   multiShapeAdsr1.Init(sample_rate, false);  //true = adsr, false = ar
-  multiShapeAdsr1.setAttackTime(0.1);
+  multiShapeAdsr1.setAttackTime(0.05);
   multiShapeAdsr1.setReleaseTime(0.1);
   multiShapeAdsr1.setAttackShape(LINEAR_SHAPE);
   multiShapeAdsr1.setDecayShape(LINEAR_SHAPE);
@@ -493,6 +500,12 @@ void setup() {
   lowPassGateFilter0.SetFreq(sample_rate);
   lowPassGateFilter1.Init(sample_rate);
   lowPassGateFilter1.SetFreq(sample_rate);
+
+  chorus.Init(sample_rate);
+  chorus.SetDelayMs(30.0f);
+  chorus.SetLfoFreq(0.3f);
+  chorus.SetLfoDepth(0.3f);
+  chorus.SetFeedback(0.55f);
 
   //read onces all gpios before starting daisy
   digitalPinsread();
@@ -512,6 +525,36 @@ void loop() {
 
 
 void ProcessAudio(float **in, float **out, size_t size) {
+  float offsetSig0Adsr;
+  float factorSig0Adsr;
+
+  float offsetSig1Adsr;
+  float factorSig1Adsr;
+
+  // computation to do only once per processAudio pass
+  if (envelopeGenSig0DecayFactor > 0.75f) {
+    // envelopeGenSig0DecayFactor 0.75 .. 1
+    // offsetSig0Adsr 0 .. 1
+    // factorSig0Adsr 1 .. 0
+    offsetSig0Adsr = 1.0f - (4.0f * (1.0f - envelopeGenSig0DecayFactor));
+    factorSig0Adsr = 1.0f - offsetSig0Adsr;
+
+  } else {
+    offsetSig0Adsr = 0.0f;
+    factorSig0Adsr = 1.0f;
+  }
+
+  if (envelopeGenSig1DecayFactor > 0.75f) {
+    // envelopeGenSig1DecayFactor 0.75 .. 1
+    // offsetSig1Adsr 0 .. 1
+    // factorSig1Adsr 1 .. 0
+    offsetSig1Adsr = 1.0f - (4.0f * (1.0f - envelopeGenSig1DecayFactor));
+    factorSig1Adsr = 1.0f - offsetSig1Adsr;
+  } else {
+    offsetSig1Adsr = 0.0f;
+    factorSig1Adsr = 1.0f;
+  }
+
   for (size_t i = 0; i < size; i++) {
 
     pulserProcess();
@@ -521,33 +564,9 @@ void ProcessAudio(float **in, float **out, size_t size) {
 
     // we have attenuated Adsr Value to have a smooth transition between adsr to no adsr
     // those attenuated adsr are only for the lpg and vca, for the patch the non attenuated adsr value is used
-    float attenuatedAdsr0Value;
-    float attenuatedAdsr1Value;
+    float attenuatedAdsr0Value = offsetSig0Adsr + adsr0Value * factorSig0Adsr;
+    float attenuatedAdsr1Value = offsetSig1Adsr + adsr1Value * factorSig1Adsr;
 
-    if (envelopeGenSig0DecayFactor > 0.75f) {
-      // envelopeGenSig0DecayFactor 0.75 .. 1
-      // offsetSig0Adsr 0 .. 1
-      // factorSig0Adsr 1 .. 0
-      float offsetSig0Adsr = 1.0f - (4.0f * (1.0f - envelopeGenSig0DecayFactor));
-      float factorSig0Adsr = 1.0f - offsetSig0Adsr;
-
-      attenuatedAdsr0Value = offsetSig0Adsr + adsr0Value * factorSig0Adsr;
-    } else {
-      attenuatedAdsr0Value = adsr0Value;
-    }
-
-    if (envelopeGenSig1DecayFactor > 0.75f) {
-      // envelopeGenSig1DecayFactor 0.75 .. 1
-      // offsetSig1Adsr 0 .. 1
-      // factorSig1Adsr 1 .. 0
-      float offsetSig1Adsr = 1.0f - (4.0f * (1.0f - envelopeGenSig1DecayFactor));
-      float factorSig1Adsr = 1.0f - offsetSig1Adsr;
-
-      attenuatedAdsr1Value = offsetSig1Adsr + adsr1Value * factorSig1Adsr;
-    }
-    {
-      attenuatedAdsr1Value = adsr1Value;
-    }
 
     lowPassGateFilter0.SetFreq((sample_rate / 2) * (attenuatedAdsr0Value * attenuatedAdsr0Value));
     lowPassGateFilter1.SetFreq((sample_rate / 2) * (attenuatedAdsr1Value * attenuatedAdsr1Value));
@@ -642,7 +661,9 @@ void ProcessAudio(float **in, float **out, size_t size) {
         attenuatedComplexMixed = attenuatedComplexMixed + (modulationOscSample * envelopeGenSig1Volume);
     }
 
-    out[0][i] = attenuatedComplexMixed;
+    float chorused = chorus.Process(attenuatedComplexMixed);
+
+    out[0][i] = chorused;
     out[1][i] = attenuatedComplexMixed;
   }
 }
@@ -1056,7 +1077,7 @@ int8_t capacitiveSensorTouch() {
 }
 
 void capacitiveStateMachine() {
-
+  static int counter = 0;
   //TRANSITION
   switch (lastCapacitiveState) {
     case IDLE:
@@ -1079,6 +1100,17 @@ void capacitiveStateMachine() {
 
     case WAIT_OUTPUT:
       {
+        counter++;
+        if (counter % 64 == 0) {
+          pixels.setPixelColor(inputPressedIndex, sourceColorHighlighted[inputPressedIndex]);
+          highlightedSource = SOURCE_MODULE(inputPressedIndex);
+          pixels.show();
+        }else if (counter % 32 == 0) {
+          pixels.setPixelColor(inputPressedIndex, sourceColor[inputPressedIndex]);
+          highlightedSource = SOURCE_MODULE(inputPressedIndex);
+          pixels.show();
+        }
+
         int8_t sensorTouchIndex = capacitiveSensorTouch();
         if (sensorTouchIndex >= INPUT_TOUCH_COUNT && sensorTouchIndex < (INPUT_TOUCH_COUNT + OUTPUT_TOUCH_COUNT)) {
           capacitiveState = OUTPUT_PRESSED;
@@ -1122,6 +1154,7 @@ void capacitiveStateMachine() {
         break;
       case WAIT_OUTPUT:
         DEBUG_PRINTLN("Enter WAIT_OUTPUT State");
+        counter = 0;
         break;
       case OUTPUT_PRESSED:
         DEBUG_PRINTLN("Enter OUTPUT_PRESSED State");
@@ -1136,7 +1169,6 @@ void capacitiveStateMachine() {
           pixels.setPixelColor(outputPressedIndex + INPUT_TOUCH_COUNT, sourceColor[inputPressedIndex]);
           pixels.show();
         }
-
 
         pixels.setPixelColor(inputPressedIndex, sourceColor[inputPressedIndex]);
         pixels.show();
@@ -1165,7 +1197,7 @@ void setComplexOscillatorFrequency(float fmModulationFactor) {  //TODO
 
   if (destinationPatches[OSC_A_FRQ] != NONE_SOURCE) {
     float modulationFactor = getModulationFactorFromPatch(destinationPatches[OSC_A_FRQ]);
-    float modulationFrequency = fmap(modulationFactor, 0, 8000, Mapping::EXP);
+    float modulationFrequency = fmap(modulationFactor, 0, 1760, Mapping::EXP);
     finalFrequency = modulationFrequency + complexOscFrequency;
   }
 
@@ -1188,7 +1220,7 @@ void setModulationOscillatorFrequency() {
 
   if (destinationPatches[OSC_B_FRQ] != NONE_SOURCE) {
     float modulationFactor = getModulationFactorFromPatch(destinationPatches[OSC_B_FRQ]);
-    float modulationFrequency = fmap(modulationFactor, 0, 8000, Mapping::EXP);
+    float modulationFrequency = fmap(modulationFactor, 0, 1760, Mapping::EXP);
     finalFrequency = modulationFrequency + modOscFrequency;
   }
 
