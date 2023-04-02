@@ -186,7 +186,7 @@ MultiShapeAdsr multiShapeAdsr0;
 MultiShapeAdsr multiShapeAdsr1;
 
 // ----------------- Capacitive sensor ---------------------------
-#define THRESHOLD_TOUCHED 200
+#define THRESHOLD_TOUCHED 65
 #define INPUT_TOUCH_COUNT 4
 #define OUTPUT_TOUCH_COUNT 5
 #define TOTAL_TOUCH_COUNT (INPUT_TOUCH_COUNT + OUTPUT_TOUCH_COUNT)
@@ -265,17 +265,17 @@ uint32_t pulserLedCount = 0;
 Adafruit_NeoPixel pixels(NUMPIXELS, DI_LEDS_DIN, NEO_GRBW + NEO_KHZ800);
 
 //Blue
-uint32_t sequencerColor = pixels.Color(0, 0, 100);
-uint32_t sequencerColorHighlighted = pixels.Color(0, 0, 255);
+uint32_t sequencerColorHighlighted = pixels.Color(50, 0, 50);
+uint32_t sequencerColor = pixels.Color(200, 0, 255);
 //Yellow
-uint32_t pulserColor = pixels.Color(100, 100, 0);
-uint32_t pulserColorHighlighted = pixels.Color(200, 200, 0);
+uint32_t pulserColorHighlighted = pixels.Color(50, 50, 0);
+uint32_t pulserColor = pixels.Color(255, 130, 0);
 //White
-uint32_t randomColor = pixels.Color(70, 70, 70);
-uint32_t randomColorHighlighted = pixels.Color(200, 200, 200);
+uint32_t randomColorHighlighted = pixels.Color(25, 25, 25);
+uint32_t randomColor = pixels.Color(255, 255, 255);
 //Green
-uint32_t envelopesColor = pixels.Color(0, 120, 0);
-uint32_t envelopesColorHighlighted = pixels.Color(0, 255, 0);
+uint32_t envelopesColorHighlighted = pixels.Color(0, 50, 0);
+uint32_t envelopesColor = pixels.Color(0, 255, 0);
 
 uint32_t noneColor = pixels.Color(0, 0, 0);
 
@@ -384,7 +384,8 @@ void OnTimerPulserInterrupt() {
       setEnvelopeLed(true);
     }
     if (avAnPulserPeriod.hasValueUpdated()) {
-      pulserPeriod = simpleAnalogNormalize(avAnPulserPeriod.getVal()) * 4.0f;  //0..4Hz = 0..240 bpm
+      float normalizedPulserVal = simpleAnalogNormalize(avAnPulserPeriod.getVal());
+      pulserPeriod = fmap(normalizedPulserVal, 0, 4.0f, Mapping::EXP);//0..4Hz = 0..240 bpm
       skipNextPulser = true;                                                   // when we reset the timer, it will trigger the interrupt directly, so we need to skip it once
       setPulserFrequency(pulserPeriod);
     }
@@ -850,11 +851,19 @@ void analogsRead() {
   complexOscAttenuator = simpleAnalogNormalize(avAnComplexoscAttenuator.getVal());
 
   if (avAnComplexoscFrequency.hasValueUpdated()) {  //TODO make this better
-    complexOscFrequency = fmap(simpleAnalogNormalize(avAnComplexoscFrequency.getFVal()), 0, 8000, Mapping::EXP);
+    float complexOscVal = simpleAnalogNormalize(avAnComplexoscFrequency.getFVal());
+    if (complexOscVal < 0.5)
+      complexOscFrequency = fmap(complexOscVal * 2.0f, 0, 3000, Mapping::EXP);
+    else
+      complexOscFrequency = fmap((complexOscVal - 0.5f) * 2.0f, 3000, 8000, Mapping::LINEAR);
   }
 
   if (avAnModoscFrequency.hasValueUpdated()) {  //TODO make this better
-    modOscFrequency = fmap(simpleAnalogNormalize(avAnModoscFrequency.getFVal()), 0, 8000, Mapping::EXP);
+    float normalizedModOscVal = simpleAnalogNormalize(avAnModoscFrequency.getFVal());
+    if (normalizedModOscVal < 0.5)
+      modOscFrequency = fmap(normalizedModOscVal * 2.0f, 0, 3000, Mapping::EXP);
+    else
+      modOscFrequency = fmap((normalizedModOscVal - 0.5f) * 2.0f, 3000, 8000, Mapping::LINEAR);
   }
 
   if (avAnModoscWaveform.hasValueUpdated()) {
@@ -1105,7 +1114,7 @@ void capacitiveStateMachine() {
           pixels.setPixelColor(inputPressedIndex, sourceColorHighlighted[inputPressedIndex]);
           highlightedSource = SOURCE_MODULE(inputPressedIndex);
           pixels.show();
-        }else if (counter % 32 == 0) {
+        } else if (counter % 32 == 0) {
           pixels.setPixelColor(inputPressedIndex, sourceColor[inputPressedIndex]);
           highlightedSource = SOURCE_MODULE(inputPressedIndex);
           pixels.show();
@@ -1304,15 +1313,10 @@ uint32_t noneColor = pixels.Color(0, 0, 0);
 #define ENVELOPE_VOLTAGE_LED PULSER_VOLTAGE_LED + 1
 */
 void setSequencerLed(uint8_t ledIndex) {
-  static bool sequencerInvert = true;
   uint8_t colorFactor = map(ledIndex, 0, 4, 20, 255);
-  sequencerInvert = !sequencerInvert;
   uint32_t color;
   if (currentSequencerStepEnable) {
-    if (sequencerInvert)
-      color = pixels.Color(0, 5, colorFactor);
-    else
-      color = pixels.Color(5, 0, colorFactor);
+    color = pixels.Color(colorFactor, 5, colorFactor);
   } else {
     color = noneColor;
   }
