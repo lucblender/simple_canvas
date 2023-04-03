@@ -300,7 +300,6 @@ float randomVoltageValue = 0.0f;
 float adsr0Value = 0.0f;
 float adsr1Value = 0.0f;
 
-float clockIncrement = 0.0f;
 float clockValue = 0.0f;
 
 void OnTimerClockInterrupt() {
@@ -385,8 +384,8 @@ void OnTimerPulserInterrupt() {
     }
     if (avAnPulserPeriod.hasValueUpdated()) {
       float normalizedPulserVal = simpleAnalogNormalize(avAnPulserPeriod.getVal());
-      pulserPeriod = fmap(normalizedPulserVal, 0, 4.0f, Mapping::EXP);//0..4Hz = 0..240 bpm
-      skipNextPulser = true;                                                   // when we reset the timer, it will trigger the interrupt directly, so we need to skip it once
+      pulserPeriod = fmap(normalizedPulserVal, 0, 4.0f, Mapping::EXP);  //0..4Hz = 0..240 bpm
+      skipNextPulser = true;                                            // when we reset the timer, it will trigger the interrupt directly, so we need to skip it once
       setPulserFrequency(pulserPeriod);
     }
   } else {
@@ -1206,8 +1205,7 @@ void setComplexOscillatorFrequency(float fmModulationFactor) {  //TODO
 
   if (destinationPatches[OSC_A_FRQ] != NONE_SOURCE) {
     float modulationFactor = getModulationFactorFromPatch(destinationPatches[OSC_A_FRQ]);
-    float modulationFrequency = fmap(modulationFactor, 0, 1760, Mapping::EXP);
-    finalFrequency = modulationFrequency + complexOscFrequency;
+    finalFrequency = modulationFactor * complexOscFrequency;
   }
 
   else {
@@ -1229,8 +1227,7 @@ void setModulationOscillatorFrequency() {
 
   if (destinationPatches[OSC_B_FRQ] != NONE_SOURCE) {
     float modulationFactor = getModulationFactorFromPatch(destinationPatches[OSC_B_FRQ]);
-    float modulationFrequency = fmap(modulationFactor, 0, 1760, Mapping::EXP);
-    finalFrequency = modulationFrequency + modOscFrequency;
+    finalFrequency = modulationFactor * modOscFrequency;
   }
 
   else {
@@ -1272,14 +1269,10 @@ void setClockFrequency(float frequency) {
   timerClock.setOverflow(int(5000 / (frequency * 2)));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency
   timerClock.refresh();                                 // Make register changes take effect
   timerClock.resume();                                  // Start
-  clockIncrement = frequency / sample_rate;
 }
 
 void pulserProcess() {
-  if (pulserTriggerSource == CLOCK_TRIGGER || pulserTriggerSource == SEQ_CLOCK_TRIGGER)
-    pulserValue -= clockIncrement;
-  else if (pulserTriggerSource == PULSER_TRIGGER || pulserTriggerSource == SEQ_PULSER_TRIGGER)
-    pulserValue -= pulserIncrement;
+  pulserValue -= pulserIncrement;
   if (pulserValue < 0.0f)
     pulserValue = 0.0f;
 }
