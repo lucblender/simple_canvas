@@ -663,8 +663,8 @@ void ProcessAudio(float **in, float **out, size_t size) {
 
     float chorused = chorus.Process(attenuatedComplexMixed);
 
-    out[0][i] = chorused;
-    out[1][i] = attenuatedComplexMixed;
+    out[0][i] = attenuatedComplexMixed;
+    out[1][i] = chorused;
   }
 }
 

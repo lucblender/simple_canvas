@@ -3,8 +3,8 @@
 
 #include "Arduino.h"
 
-//AVERAGE_LEN should be a multiple of 2 to optimize the division
-#define AVERAGE_LEN 32
+//AVERAGE_LEN should be a multiple of 2 (+2 because we always remove min and max) to optimize the division
+#define AVERAGE_LEN (16 + 2)
 
 class AveragedAnalog {
 public:
