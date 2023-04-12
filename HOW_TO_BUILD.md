@@ -32,7 +32,7 @@ You'll need to solder each output of the potentiometers to a diode anode (**top*
 ![Diodes Linear potentiometers](resources/pictures/Instructions%20(3).jpg)
 
 You can now wire the 5 digital gpios to the inputs of the 5 potentiometers. (cheat sheet lin pot). I first did a little wrap on the bottom to route the linear potentiometer pin to pins that are connected to the bottom row. 
-![Potentiometers digital gpios](ressources/pictures/Instructions%20(7).jpg)
+![Potentiometers digital gpios](resources/pictures/Instructions%20(7).jpg)
 Finish by wiring the 5 top pins to the 5 bottom pins by following the cheat sheet.
 
 You can test all the linear potentiometers with the test code by uncommenting ```sequencerStepsRead();```.
@@ -54,7 +54,7 @@ The rest of the digital pins are connected to the gpio expander. The 1st step is
 
 You can find them by searching _switch 3 pos 0_ and _switch 3 pos 1_ in the Component type column of the cheat sheet. The _switch 3 pos 0_ are already connected by the footprint, you'll need to connect all the _switch 3 pos 1_  wires from the footprint to their corresponding Pin top. You can refer to the following pictures, it's the 6 little yellow wires next to the switches in the middle of the board. 
 
-![3 position switches](ressources/pictures/Instructions%20(8).jpg)
+![3 position switches](resources/pictures/Instructions%20(8).jpg)
 
 After this step, you can wire the MCP23017. Search for _gpioExpander_ in the Component type column. You'll have two interrupts signal and i2c pins. Don't forget to also put 3V3 and GND into the MCP23017!
 
@@ -121,7 +121,7 @@ You can already add some long wires on the 1st led to solder it at the end when 
 
 Here is an example of what it should look like
 
-![close up led](ressources/pictures/Instructions%20(5).jpg)
+![close up led](resources/pictures/Instructions%20(5).jpg)
 
 When all your leds are soldered together you can mount the 3D-printed pieces to the PCB. 
 
