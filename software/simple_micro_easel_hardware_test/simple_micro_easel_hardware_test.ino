@@ -7,6 +7,14 @@ using namespace daisysp;
 
 #include <Adafruit_NeoPixel.h>
 
+//Comment or uncomment each of those lines to test a specific part of your synth
+
+#define TEST_NEOPIXELS
+//#define TEST_SEQUENCER_STEPS_READ
+//#define TEST_ANALOGS_READ
+//#define TEST_CAPACITIVE_TOUCH_READ
+#define TEST_MCP_PINS_READ
+//#define TEST_DIGITAL_PINS_READ
 
 #define AN_SEQUENCER_STEPANALOGIN A0
 #define AN_CLOCK_RATE A1
@@ -110,7 +118,7 @@ Adafruit_MPR121 cap = Adafruit_MPR121();
 
 #define NUMPIXELS 13
 
-Adafruit_NeoPixel pixels(NUMPIXELS, DI_LEDS_DIN, NEO_RGB + NEO_KHZ800);
+Adafruit_NeoPixel pixels(NUMPIXELS, DI_LEDS_DIN, NEO_GRBW + NEO_KHZ800);
 
 // --------------------- Gpio expander --------------------------
 Adafruit_MCP23X17 mcp;
@@ -126,19 +134,23 @@ void setup() {
     digitalWrite(DI_SEQUENCER_STEPSELECT[i], 0);
   }
 
+#ifdef TEST_CAPACITIVE_TOUCH_READ
   if (!cap.begin(0x5A)) {
     Serial.println("MPR121 not found, check wiring?");
     while (1)
       ;
   }
   Serial.println("MPR121 found!");
+#endif
 
+#ifdef TEST_MCP_PINS_READ
   if (!mcp.begin_I2C()) {
     Serial.println("MCP not found, check wiring?");
     while (1)
       ;
   }
   Serial.println("MCP found!");
+#endif
 
   mcp.pinMode(DI_SEQUENCER_TRIGGER, INPUT_PULLUP);
   mcp.pinMode(DI_SEQUENCER_STAGE0, INPUT_PULLUP);
@@ -166,11 +178,12 @@ void setup() {
   pinMode(DI_SEQUENCER_STEP1, INPUT_PULLUP);
   pinMode(DI_SEQUENCER_STEP0, INPUT_PULLUP);
 
-
+#ifdef TEST_NEOPIXELS
   pixels.begin();
   pixels.clear();  // Set all pixel colors to 'off'
   pixels.fill(pixels.Color(20, 0, 0));
   pixels.show();
+#endif
 
   // DAISY SETUP
   DAISY.init(DAISY_SEED, AUDIO_SR_48K);
@@ -180,11 +193,22 @@ void setup() {
 void loop() {
   // uncomment a line to do hardware test of specific part
 
-  //sequencerStepsRead();
+
+#ifdef TEST_SEQUENCER_STEPS_READ
+  sequencerStepsRead();
+#endif
+#ifdef TEST_ANALOGS_READ
   analogsRead();
-  //capacitiveTouchRead();
-  //mcpPinsRead();
-  //digitalPinsread();
+#endif
+#ifdef TEST_CAPACITIVE_TOUCH_READ
+  capacitiveTouchRead();
+#endif
+#ifdef TEST_MCP_PINS_READ
+  mcpPinsRead();
+#endif
+#ifdef TEST_DIGITAL_PINS_READ
+  digitalPinsread();
+#endif
 
   delay(10);
 }

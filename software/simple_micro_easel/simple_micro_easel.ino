@@ -186,7 +186,7 @@ MultiShapeAdsr multiShapeAdsr0;
 MultiShapeAdsr multiShapeAdsr1;
 
 // ----------------- Capacitive sensor ---------------------------
-#define THRESHOLD_TOUCHED 65
+#define THRESHOLD_TOUCHED 95
 #define INPUT_TOUCH_COUNT 4
 #define OUTPUT_TOUCH_COUNT 5
 #define TOTAL_TOUCH_COUNT (INPUT_TOUCH_COUNT + OUTPUT_TOUCH_COUNT)

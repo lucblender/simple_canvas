@@ -8,7 +8,7 @@ The main table top pin and bottom pin refer to the simple board pins (top and bo
 
 ## Test Code
 
-A test code to help you debug your hardware can be found in the software folder and is named [simple_micro_easel_hardware_test.ino](software/simple_micro_easel_hardware_test/simple_micro_easel_hardware_test.ino). In the loop function, you can comment and uncomment the function to test the different part of the simple micro easel. In this document, I'll refer to this code as the "test code".
+A test code to help you debug your hardware can be found in the software folder and is named [simple_micro_easel_hardware_test.ino](software/simple_micro_easel_hardware_test/simple_micro_easel_hardware_test.ino). On top of the code l12 to l17, you can comment and uncomment the define to enable of disable tests, I'll refer to this code as the "test code".
 
 ### Final result
 Here is the final result: 
@@ -35,18 +35,18 @@ You can now wire the 5 digital gpios to the inputs of the 5 potentiometers. (che
 ![Potentiometers digital gpios](resources/pictures/Instructions%20(7).jpg)
 Finish by wiring the 5 top pins to the 5 bottom pins by following the cheat sheet.
 
-You can test all the linear potentiometers with the test code by uncommenting ```sequencerStepsRead();```.
+You can test all the linear potentiometers with the test code by uncommenting l13 ```#define TEST_SEQUENCER_STEPS_READ```.
 
 ### Rotary potentiometers
 
 The next steps are the rotary potentiometers. Simply search for _pot_ in the Component type column of the cheat sheet and solder their corresponding top to the bottom row.
-You can test all the linear potentiometers with the test code by uncommenting ```analogsRead();();```.
+You can test all the linear potentiometers with the test code by uncommenting l14 ```#define TEST_ANALOGS_READ```.
 
 ### Digital pins connected to the daisy
 
 Only 5 digital pins are connected from the board to the daisy. You can find them in the cheat sheet by their Signal Name _Step0 to Step4_. You can solder their corresponding top to the bottom row.
 
-You can test all the linear potentiometers with the test code by uncommenting ```digitalPinsread();```.
+You can test all the linear potentiometers with the test code by uncommenting l17```#define TEST_DIGITAL_PINS_READ```.
 
 ### Digital pins connected to the MCP23017 
 
@@ -61,7 +61,7 @@ After this step, you can wire the MCP23017. Search for _gpioExpander_ in the Com
 You can now wire all the digital Gpios from the top row to the MCP23071 Gpios.  Search for _\_A0 to \_A7 and \_B0 to \_B7_ in the cheat sheet.
 
 
-You can test all the MCP23017 gpios with the test code by uncommenting ```mcpPinsRead();```.
+You can test all the MCP23017 gpios with the test code by uncommenting l16 ```#define TEST_MCP_PINS_READ```.
 
 ### Capacitive touch sensor MPR121
 
@@ -83,7 +83,7 @@ The last step is to wire the capacitive electrode from the front panel to the MP
 | 9                                | 8                              |
 
 
-You can test capacitive touch pads with the test code by uncommenting ```capacitiveTouchRead();```.
+You can test capacitive touch pads with the test code by uncommenting l15 ```#define TEST_CAPACITIVE_TOUCH_READ```.
 
 ### Leds
 
@@ -134,7 +134,7 @@ The _Led_holder_source_ is a bit tricky to install. The 3D-printed holder is mad
 The _Led_holder_main_ is easier to put, it will clip itself thanks to some switch. The _Blocker_destination_ will clip itself on the _Led_holder_main_ piece.
 
 Finally, you can solder the 1st led to some VCC, GND, and the DIN according to the cheat sheet. Search for neopixel as component type.
-You can test all the leds with the test code. No need to uncomment anything this time, in the setup they are all turned on in light red.
+You can test all the leds with the test code by uncommenting l112 ```#define TEST_NEOPIXELS```. All leds are turned on in a light red.
 
 ##### Leds noise
 
