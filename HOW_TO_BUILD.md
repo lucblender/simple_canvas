@@ -77,10 +77,10 @@ The last step is to wire the capacitive electrode from the front panel to the MP
 | 4                                | 2                              |
 | 5                                | 3                              |
 | 0                                | Not connected                  |
-| 6                                | 5                              |
-| 7                                | 6                              |
-| 8                                | 7                              |
-| 9                                | 8                              |
+| 6                                | 8                              |
+| 7                                | 7                              |
+| 8                                | 6                              |
+| 9                                | 5                              |
 
 
 You can test capacitive touch pads with the test code by uncommenting l15 ```#define TEST_CAPACITIVE_TOUCH_READ```.
