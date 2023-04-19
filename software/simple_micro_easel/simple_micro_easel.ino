@@ -326,13 +326,13 @@ void OnTimerClockInterrupt() {
       }
       if (envelopeGenSig0TriggerSource == CLOCK_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
 
-        multiShapeAdsr0.setAttackTime(0.05f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
+        multiShapeAdsr0.setAttackTime(0.01f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
         multiShapeAdsr0.setReleaseTime(clockPeriodSecond * envelopeGenSig0DecayFactor);
         multiShapeAdsr0.retrigger();
       }
       if (envelopeGenSig1TriggerSource == CLOCK_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
 
-        multiShapeAdsr1.setAttackTime(0.05f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
+        multiShapeAdsr1.setAttackTime(0.01f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
         multiShapeAdsr1.setReleaseTime(clockPeriodSecond * envelopeGenSig1DecayFactor);
         multiShapeAdsr1.retrigger();
         setEnvelopeLed(true);
@@ -372,12 +372,12 @@ void OnTimerPulserInterrupt() {
       setRandomLed(randomVoltageValue);
     }
     if (envelopeGenSig0TriggerSource == PULSER_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
-      multiShapeAdsr0.setAttackTime(0.05f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
+      multiShapeAdsr0.setAttackTime(0.01f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
       multiShapeAdsr0.setReleaseTime(pulserPeriodSecond * envelopeGenSig0DecayFactor);
       multiShapeAdsr0.retrigger();
     }
     if (envelopeGenSig1TriggerSource == PULSER_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
-      multiShapeAdsr1.setAttackTime(0.05f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
+      multiShapeAdsr1.setAttackTime(0.01f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
       multiShapeAdsr1.setReleaseTime(pulserPeriodSecond * envelopeGenSig1DecayFactor);
       multiShapeAdsr1.retrigger();
       setEnvelopeLed(true);
@@ -842,7 +842,9 @@ void analogsRead() {
   avAnComplexoscAttenuator.updateValue(analogRead(AN_COMPLEXOSC_ATTENUATOR));
   avAnEnvelopegenSig0decay.updateValue(analogRead(AN_ENVELOPEGEN_SIG0DECAY));
   avAnEnvelopegenSig1decay.updateValue(analogRead(AN_ENVELOPEGEN_SIG1DECAY));
-  envelopeGenSlopeShape = (int)simpleAnalogReadAndMap(AN_ENVELOPEGEN_SLOPESHAPE, 0, 6.5);
+  
+  envelopeGenSlopeShape = analogeToEnvelopeShapeIndex(analogRead(AN_ENVELOPEGEN_SLOPESHAPE));
+  //(int)simpleAnalogReadAndMap(AN_ENVELOPEGEN_SLOPESHAPE, 0, 6);
 
   modOscWaveform = simpleAnalogNormalize(avAnModoscWaveform.getVal());
   modOscAttenuator = simpleAnalogNormalize(avAnModoscAttenuator.getVal());
@@ -923,6 +925,8 @@ void analogsRead() {
   }
 
   if (envelopeGenSlopeShape != envelopeGenSlopeShapeOld) {
+    Serial.print("envelopeGenSlopeShape: ");
+    Serial.println(envelopeGenSlopeShape);
     switch (envelopeGenSlopeShape) {
       case 0:
         {
@@ -1051,6 +1055,25 @@ float simpleAnalogReadAndMap(uint32_t pin, long min, long max) {
 
 float simpleAnalogMap(uint32_t value, long min, long max) {
   return map(1023 - value, 0, 1023, min, max);
+}
+
+//Compute the correct index to give to adsr
+//Put trigger by hand cause interpolation was not giving what I wanted :(
+int analogeToEnvelopeShapeIndex(uint32_t value) {
+  if (value > 990)
+    return 0;
+  else if (value > 830)
+    return 1;
+  else if (value > 610)
+    return 2;
+  else if (value > 400)
+    return 3;
+  else if (value > 200)
+    return 4;
+  else if (value > 30)
+    return 5;
+  else 
+    return 6;
 }
 
 int8_t capacitiveSensorTouch() {

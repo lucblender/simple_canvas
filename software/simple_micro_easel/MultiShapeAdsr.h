@@ -74,4 +74,5 @@ public:
   };
 
   float squareFloat(float x);
+  float cubeFloat(float x);
 #endif  // MULTI_SHAPE_ADSR_H

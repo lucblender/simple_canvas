@@ -163,9 +163,9 @@ float MultiShapeAdsr::interpolateRisingSlope(uint8_t slopeShape, uint32_t indexT
     case LINEAR_SHAPE:
       return (indexTimer * (1.0f / nSample)) * range + startRise;
     case QUADRATIC_SHAPE:
-      return ((squareFloat(((float)indexTimer / (float)nSample))) * range + startRise);
+      return ((cubeFloat(((float)indexTimer / (float)nSample))) * range + startRise);
     case QUADRATIC_INVERT_SHAPE:
-      return ((1.0f - squareFloat(((float)(nSample - indexTimer) / (float)(nSample))))) * range + startRise;
+      return ((1.0f - cubeFloat(((float)(nSample - indexTimer) / (float)(nSample))))) * range + startRise;
     case LOGISTIC_SHAPE:
       return (1.0f - 1.0f / (1.0f + expf(-5.0f + (indexTimer / (nSample / 10.0f))))) * range + startRise;
     default:
@@ -178,9 +178,9 @@ float MultiShapeAdsr::interpolateFallingSlope(uint8_t slopeShape, uint32_t index
     case LINEAR_SHAPE:
       return (1.0f - indexTimer * (1.0f / nSample)) * range + endFall;
     case QUADRATIC_SHAPE:
-      return ((squareFloat((float)(nSample - indexTimer) / (float)(nSample))) * range + endFall);
+      return ((cubeFloat((float)(nSample - indexTimer) / (float)(nSample))) * range + endFall);
     case QUADRATIC_INVERT_SHAPE:
-      return ((1.0f - squareFloat(((float)(indexTimer) / (float)(nSample)))) * range + endFall);
+      return ((1.0f - cubeFloat(((float)(indexTimer) / (float)(nSample)))) * range + endFall);
     case LOGISTIC_SHAPE:
       return (1.0f / (1.0f + expf(-5.0f + (indexTimer / (nSample / 10.0f))))) * range + endFall;
     default:
@@ -189,4 +189,7 @@ float MultiShapeAdsr::interpolateFallingSlope(uint8_t slopeShape, uint32_t index
 }
 float squareFloat(float x) {
   return x * x;
+}
+float cubeFloat(float x) {
+  return x * x * x;
 }
