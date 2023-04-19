@@ -384,7 +384,7 @@ void OnTimerPulserInterrupt() {
     }
     if (avAnPulserPeriod.hasValueUpdated()) {
       float normalizedPulserVal = simpleAnalogNormalize(avAnPulserPeriod.getVal());
-      pulserPeriod = fmap(normalizedPulserVal, 0, 4.0f, Mapping::EXP);  //0..4Hz = 0..240 bpm
+      pulserPeriod = fmap(normalizedPulserVal, 0, 6.0f, Mapping::EXP);  //0..6Hz = 0..360 bpm --> double of clock
       skipNextPulser = true;                                            // when we reset the timer, it will trigger the interrupt directly, so we need to skip it once
       setPulserFrequency(pulserPeriod);
     }
