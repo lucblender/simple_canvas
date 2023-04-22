@@ -469,7 +469,7 @@ void setup() {
   modulationOsc.Init(sample_rate);
   setModulationOscillatorFrequency();
 
-  setPulserFrequency(3);
+  setPulserFrequency(6);
   timerPulser.resume();  // Start
   timerPulser.attachInterrupt(OnTimerPulserInterrupt);
 
@@ -572,18 +572,18 @@ void ProcessAudio(float **in, float **out, size_t size) {
     lowPassGateFilter1.SetFreq((sample_rate / 2) * (attenuatedAdsr1Value * attenuatedAdsr1Value));
 
     float modulatedComplexOscTimbre = computeModulatedComplexOscTimbre();
-    float modulatedModOscAttenuator = computeModulatedComplexOscAttenuator();
+    float modulatedComplexOscAttenuator = computeModulatedComplexOscAttenuator();
 
     computeModulationOscWaveform();
     setModulationOscillatorFrequency();
 
     float modulationOscSample = modulationOsc.Process();
 
-    float attenuatedModulationOscSample = modulationOscSample * modulatedModOscAttenuator;
+    float attenuatedModulationOscSample = modulationOscSample * modulatedComplexOscAttenuator;
     float attenuatedComplexMixed;
 
 
-    if (modulatedModOscAttenuator > 0.1f) {
+    if (modulatedComplexOscAttenuator > 0.1f) {
       if (modOscAmFm == 0) {  //0 = AM
 
         // si attenuator = 0 --> signal sans modulation  signal = attenuatedComplexMixed
@@ -592,9 +592,9 @@ void ProcessAudio(float **in, float **out, size_t size) {
         //si attenuator = 0 --> signal
 
         // modulationOscSample oscillate -1..1
-        // modulatedModOscAttenuator 0..1 gain
+        // modulatedComplexOscAttenuator 0..1 gain
 
-        float gain = 1.0f - (((modulationOscSample + 1.0f) / 2) * modulatedModOscAttenuator);
+        float gain = 1.0f - (((modulationOscSample + 1.0f) / 2) * modulatedComplexOscAttenuator);
 
 
         setComplexOscillatorFrequency(0.0f);
@@ -603,22 +603,22 @@ void ProcessAudio(float **in, float **out, size_t size) {
         float complexBasisSample = complexOscBasis.Process();
 
         float complexMixed = (1.0 - modulatedComplexOscTimbre) * complexSinusSample + modulatedComplexOscTimbre * complexBasisSample;
-        attenuatedComplexMixed = complexMixed * complexOscAttenuator * gain;
+        attenuatedComplexMixed = complexMixed * gain;
       } else {  // 1 = FM
 
         // modulationOscSample oscillate -1..1
         //(modulationOscSample * 0.5f) -0.5 .. 0.5
-        // modulatedModOscAttenuator 0..1 gain
+        // modulatedComplexOscAttenuator 0..1 gain
         // fmFrequencyRamp --> example complexOscFrequency = 400hz --> 400 * 0.1 * ((-0.5..0.5)*0..1)
 
-        float fmModulationFactor = 0.5 * ((modulationOscSample)*modulatedModOscAttenuator);
+        float fmModulationFactor = 0.5 * ((modulationOscSample)*modulatedComplexOscAttenuator);
         setComplexOscillatorFrequency(fmModulationFactor);
         float complexSinusSample = complexOscSinus.Process();
         float complexBasisSample = complexOscBasis.Process();
 
         float complexMixed = (1.0 - modulatedComplexOscTimbre) * complexSinusSample + modulatedComplexOscTimbre * complexBasisSample;
 
-        attenuatedComplexMixed = complexMixed * complexOscAttenuator;
+        attenuatedComplexMixed = complexMixed;
       }
     } else {
       setComplexOscillatorFrequency(0.0f);
@@ -626,7 +626,7 @@ void ProcessAudio(float **in, float **out, size_t size) {
       float complexBasisSample = complexOscBasis.Process();
 
       float complexMixed = (1.0 - modulatedComplexOscTimbre) * complexSinusSample + modulatedComplexOscTimbre * complexBasisSample;
-      attenuatedComplexMixed = complexMixed * complexOscAttenuator;
+      attenuatedComplexMixed = complexMixed;
     }
 
     //apply filter even if not used to keep it up to date
@@ -644,21 +644,20 @@ void ProcessAudio(float **in, float **out, size_t size) {
     }
     attenuatedComplexMixed = attenuatedComplexMixed * envelopeGenSig0Volume;
 
-
     float lpgModulationMixed = lowPassGateFilter1.Process(modulationOscSample * 2.0f);
     // add modulation osc
     if (envelopeGenSig1Volume > 0.02f) {
       if (envelope1Enable) {
         if (envelopeGenSig1LpgVca == 0)  //LPG
         {
-          attenuatedComplexMixed = attenuatedComplexMixed + lpgModulationMixed * envelopeGenSig1Volume;
+          attenuatedComplexMixed = attenuatedComplexMixed + (lpgModulationMixed * envelopeGenSig1Volume)*modOscAttenuator;
         } else  //VCA
         {
-          attenuatedComplexMixed = attenuatedComplexMixed + (modulationOscSample * envelopeGenSig1Volume * attenuatedAdsr1Value);
+          attenuatedComplexMixed = attenuatedComplexMixed + ((modulationOscSample * envelopeGenSig1Volume * attenuatedAdsr1Value))*modOscAttenuator;
         }
 
       } else
-        attenuatedComplexMixed = attenuatedComplexMixed + (modulationOscSample * envelopeGenSig1Volume);
+        attenuatedComplexMixed = attenuatedComplexMixed + ((modulationOscSample * envelopeGenSig1Volume))*modOscAttenuator;
     }
 
     float chorused = chorus.Process(attenuatedComplexMixed);
@@ -1393,9 +1392,9 @@ float computeModulatedComplexOscTimbre() {
 float computeModulatedComplexOscAttenuator() {
   if (destinationPatches[OSC_B_ATT] != NONE_SOURCE) {
     float modulationFactor = getModulationFactorFromPatch(destinationPatches[OSC_B_ATT]);
-    return modulationFactor * modOscAttenuator;
+    return modulationFactor * complexOscAttenuator;
   } else {
-    return modOscAttenuator;
+    return complexOscAttenuator;
   }
 }
 
