@@ -331,15 +331,17 @@ void OnTimerClockInterrupt() {
       if (envelopeGenSig0TriggerSource == CLOCK_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
 
         float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig0DecayFactor;
-      
-        multiShapeAdsr0.setAttackTime(fullTimeAttackRelease*slopeFactor);
-        multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease*(1.0f-slopeFactor));
+
+        multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
+        multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
         multiShapeAdsr0.retrigger();
       }
       if (envelopeGenSig1TriggerSource == CLOCK_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
 
-        multiShapeAdsr1.setAttackTime(0.01f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
-        multiShapeAdsr1.setReleaseTime(clockPeriodSecond * envelopeGenSig1DecayFactor);
+        float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig1DecayFactor;
+
+        multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
+        multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
         multiShapeAdsr1.retrigger();
         setEnvelopeLed(true);
       }
@@ -378,13 +380,19 @@ void OnTimerPulserInterrupt() {
       setRandomLed(randomVoltageValue);
     }
     if (envelopeGenSig0TriggerSource == PULSER_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
-      multiShapeAdsr0.setAttackTime(0.01f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
-      multiShapeAdsr0.setReleaseTime(pulserPeriodSecond * envelopeGenSig0DecayFactor);
+
+      float fullTimeAttackRelease = pulserPeriodSecond * envelopeGenSig0DecayFactor;
+
+      multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
+      multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
       multiShapeAdsr0.retrigger();
     }
     if (envelopeGenSig1TriggerSource == PULSER_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
-      multiShapeAdsr1.setAttackTime(0.01f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
-      multiShapeAdsr1.setReleaseTime(pulserPeriodSecond * envelopeGenSig1DecayFactor);
+
+      float fullTimeAttackRelease = pulserPeriodSecond * envelopeGenSig1DecayFactor;
+
+      multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
+      multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
       multiShapeAdsr1.retrigger();
       setEnvelopeLed(true);
     }
@@ -866,7 +874,7 @@ void analogsRead() {
       slopeMorphFactor = 0.0f;
     } else if (rawVal > shapeBLowerBound) {  // from 723 to 300 stay at 0.9 but pass from shape A, to shape B
       slopeFactor = higherSLopeFactor;
-      
+
       float tmpVal = map(rawVal, shapeAHigherBound, shapeBLowerBound, 0, 1023) / 1023.0f;
       slopeMorphFactor = fmap(tmpVal, 0.0f, 1.0f, Mapping::LINEAR);
 
@@ -968,7 +976,7 @@ void analogsRead() {
   if (envelopeGenSlopeShape != envelopeGenSlopeShapeOld) {
     Serial.print("envelopeGenSlopeShape: ");
     Serial.println(envelopeGenSlopeShape);
-    envelopeGenSlopeShape = 1; //TODO forced a shape 
+    envelopeGenSlopeShape = 1;  //TODO forced a shape
     switch (envelopeGenSlopeShape) {
       case 0:
         {
