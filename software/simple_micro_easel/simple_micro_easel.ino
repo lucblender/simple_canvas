@@ -40,7 +40,7 @@ using namespace daisysp;
 #define AN_ENVELOPEGEN_SLOPESHAPE A11
 
 AveragedAnalog avAnClockRate((uint32_t)4);
-;
+
 AveragedAnalog avAnPulserPeriod((uint32_t)4);
 AveragedAnalog avAnModoscFrequency(true);
 AveragedAnalog avAnModoscWaveform;
@@ -486,6 +486,7 @@ void setup() {
   timerPulser.attachInterrupt(OnTimerPulserInterrupt);
 
   setClockFrequency(3);
+  timerClock.resume();  // Start
   timerClock.attachInterrupt(OnTimerClockInterrupt);
 
   // init adsr
@@ -857,9 +858,8 @@ void analogsRead() {
       slopeMorphFactor = 1.0f;
     }
 
-    multiShapeAdsr0.setShapeFactor(1.0f-slopeMorphFactor, slopeMorphFactor);
-    multiShapeAdsr1.setShapeFactor(1.0f-slopeMorphFactor, slopeMorphFactor);
-
+    multiShapeAdsr0.setShapeFactor(1.0f - slopeMorphFactor, slopeMorphFactor);
+    multiShapeAdsr1.setShapeFactor(1.0f - slopeMorphFactor, slopeMorphFactor);
   }
 
   modOscWaveform = simpleAnalogNormalize(avAnModoscWaveform.getVal());
@@ -1198,7 +1198,6 @@ void setClockFrequency(float frequency) {
   timerClock.setPrescaleFactor(40000);                  // = Set prescaler to 4800 => timer frequency = 200MHz / 40000  = 5000 Hz
   timerClock.setOverflow(int(5000 / (frequency * 2)));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency
   timerClock.refresh();                                 // Make register changes take effect
-  timerClock.resume();                                  // Start
 }
 
 void pulserProcess() {
