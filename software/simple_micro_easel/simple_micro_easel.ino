@@ -7,7 +7,7 @@ using namespace daisysp;
 
 #include <Adafruit_NeoPixel.h>
 
-#include "MultiShapeAdsr.h"
+#include "MorphingMultiShapeAdsr.h"
 #include "AveragedAnalog.h"
 
 #define DEBUG
@@ -50,6 +50,7 @@ AveragedAnalog avAnComplexoscFrequency(true);
 AveragedAnalog avAnComplexoscAttenuator;
 AveragedAnalog avAnEnvelopegenSig0decay;
 AveragedAnalog avAnEnvelopegenSig1decay;
+AveragedAnalog avAnEnvelopeShape;
 
 //Digital input gpio definition
 #define DI_MIDIIN 1
@@ -99,7 +100,6 @@ uint8_t DI_SEQUENCER_STEPSELECT[5] = { DI_SEQUENCER_STEPSELECT0, DI_SEQUENCER_ST
 float sequencerStepAnalogIn[5];
 float clockRate;
 float envelopeGenSig1Decay;
-int envelopeGenSlopeShape;
 float pulserPeriod = 3.0f;
 float modOscFrequency = 440.0f;  //just in case we set frequency with it before it succeed to read the analog value, should never happen
 float modOscWaveform;
@@ -114,7 +114,6 @@ float complexOscFrequencyOld = DEFAULT_VALUE;
 float modOscWaveformOld = DEFAULT_VALUE;
 float pulserPeriodOld = DEFAULT_VALUE;
 float clockRateOld = DEFAULT_VALUE;
-int envelopeGenSlopeShapeOld = DEFAULT_SIGNED_VALUE;
 float envelopeGenSig0DecayOld = DEFAULT_VALUE;
 float envelopeGenSig1DecayOld = DEFAULT_VALUE;
 
@@ -126,6 +125,9 @@ float envelopeGenSig1Volume = DEFAULT_VALUE;
 
 bool envelope0Enable = true;
 bool envelope1Enable = true;
+
+float slopeFactor = 0.0f;
+float slopeMorphFactor = 0.0f;
 
 // ditial pins value
 uint8_t sequencerSteps[5] = { 0, 0, 0, 0, 0 };
@@ -182,8 +184,8 @@ float sample_rate;
 
 // ---------------------- Custom modules ------------------------
 
-MultiShapeAdsr multiShapeAdsr0;
-MultiShapeAdsr multiShapeAdsr1;
+MorphingMultiShapeAdsr multiShapeAdsr0;
+MorphingMultiShapeAdsr multiShapeAdsr1;
 
 // ----------------- Capacitive sensor ---------------------------
 #define THRESHOLD_TOUCHED 95
@@ -326,14 +328,18 @@ void OnTimerClockInterrupt() {
       }
       if (envelopeGenSig0TriggerSource == CLOCK_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
 
-        multiShapeAdsr0.setAttackTime(0.01f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
-        multiShapeAdsr0.setReleaseTime(clockPeriodSecond * envelopeGenSig0DecayFactor);
+        float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig0DecayFactor;
+
+        multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
+        multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
         multiShapeAdsr0.retrigger();
       }
       if (envelopeGenSig1TriggerSource == CLOCK_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
 
-        multiShapeAdsr1.setAttackTime(0.01f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
-        multiShapeAdsr1.setReleaseTime(clockPeriodSecond * envelopeGenSig1DecayFactor);
+        float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig1DecayFactor;
+
+        multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
+        multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
         multiShapeAdsr1.retrigger();
         setEnvelopeLed(true);
       }
@@ -372,13 +378,19 @@ void OnTimerPulserInterrupt() {
       setRandomLed(randomVoltageValue);
     }
     if (envelopeGenSig0TriggerSource == PULSER_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
-      multiShapeAdsr0.setAttackTime(0.01f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
-      multiShapeAdsr0.setReleaseTime(pulserPeriodSecond * envelopeGenSig0DecayFactor);
+
+      float fullTimeAttackRelease = pulserPeriodSecond * envelopeGenSig0DecayFactor;
+
+      multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
+      multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
       multiShapeAdsr0.retrigger();
     }
     if (envelopeGenSig1TriggerSource == PULSER_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
-      multiShapeAdsr1.setAttackTime(0.01f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
-      multiShapeAdsr1.setReleaseTime(pulserPeriodSecond * envelopeGenSig1DecayFactor);
+
+      float fullTimeAttackRelease = pulserPeriodSecond * envelopeGenSig1DecayFactor;
+
+      multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
+      multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
       multiShapeAdsr1.retrigger();
       setEnvelopeLed(true);
     }
@@ -480,18 +492,18 @@ void setup() {
   multiShapeAdsr0.Init(sample_rate, false);  //true = adsr, false = ar
   multiShapeAdsr0.setAttackTime(0.05);
   multiShapeAdsr0.setReleaseTime(0.05);
-  multiShapeAdsr0.setAttackShape(LINEAR_SHAPE);
-  multiShapeAdsr0.setDecayShape(LINEAR_SHAPE);
-  multiShapeAdsr0.setReleaseShape(LINEAR_SHAPE);
+  multiShapeAdsr0.setAttackShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  multiShapeAdsr0.setDecayShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  multiShapeAdsr0.setReleaseShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
   // multiShapeAdsr0.setDecayTime(0.1); //uncomment if adsr and not just ar
   // multiShapeAdsr0.setSustainLevel(.7); //uncomment if adsr and not just ar
 
   multiShapeAdsr1.Init(sample_rate, false);  //true = adsr, false = ar
   multiShapeAdsr1.setAttackTime(0.05);
   multiShapeAdsr1.setReleaseTime(0.1);
-  multiShapeAdsr1.setAttackShape(LINEAR_SHAPE);
-  multiShapeAdsr1.setDecayShape(LINEAR_SHAPE);
-  multiShapeAdsr1.setReleaseShape(LINEAR_SHAPE);
+  multiShapeAdsr1.setAttackShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  multiShapeAdsr1.setDecayShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  multiShapeAdsr1.setReleaseShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
   // multiShapeAdsr1.setDecayTime(0.1);//uncomment if adsr and not just ar
   // multiShapeAdsr1.setSustainLevel(.7);//uncomment if adsr and not just ar
 
@@ -650,14 +662,14 @@ void ProcessAudio(float **in, float **out, size_t size) {
       if (envelope1Enable) {
         if (envelopeGenSig1LpgVca == 0)  //LPG
         {
-          attenuatedComplexMixed = attenuatedComplexMixed + (lpgModulationMixed * envelopeGenSig1Volume)*modOscAttenuator;
+          attenuatedComplexMixed = attenuatedComplexMixed + (lpgModulationMixed * envelopeGenSig1Volume) * modOscAttenuator;
         } else  //VCA
         {
-          attenuatedComplexMixed = attenuatedComplexMixed + ((modulationOscSample * envelopeGenSig1Volume * attenuatedAdsr1Value))*modOscAttenuator;
+          attenuatedComplexMixed = attenuatedComplexMixed + ((modulationOscSample * envelopeGenSig1Volume * attenuatedAdsr1Value)) * modOscAttenuator;
         }
 
       } else
-        attenuatedComplexMixed = attenuatedComplexMixed + ((modulationOscSample * envelopeGenSig1Volume))*modOscAttenuator;
+        attenuatedComplexMixed = attenuatedComplexMixed + ((modulationOscSample * envelopeGenSig1Volume)) * modOscAttenuator;
     }
 
     float chorused = chorus.Process(attenuatedComplexMixed);
@@ -694,8 +706,6 @@ void mcpPinsRead() {
   envelopeGenSig1LpgVca = mcp.digitalRead(DI_ENVELOPEGEN_SIG1LPGVCA);
 
   if (sequencerTriggerOld != sequencerTrigger) {  // 0 clock, 1 pulser
-    Serial.print("sequencerTrigger ");
-    Serial.println(sequencerTrigger);
     if (sequencerTrigger == 0)
       sequencerTriggerSource = SEQ_CLOCK_TRIGGER;
     else
@@ -711,8 +721,6 @@ void mcpPinsRead() {
       envelopeGenSig1TriggerSource = sequencerTriggerSource;
   }
   if (sequencerStageOld != sequencerStage) {  // 2 = 3steps, 3 = 4steps, 1 = 5steps
-    Serial.print("sequencerStage ");
-    Serial.println(sequencerStage);
     switch (sequencerStage) {
       case 2:
         sequencerLenght = 3;
@@ -726,8 +734,6 @@ void mcpPinsRead() {
     }
   }
   if (randomTriggerSelectOld != randomTriggerSelect) {  //2 = pulser, 3 = clock, 1 = sequencer
-    Serial.print("randomTriggerSelect ");
-    Serial.println(randomTriggerSelect);
     switch (randomTriggerSelect) {
       case 2:
         randomVoltageTriggerSource = PULSER_TRIGGER;
@@ -742,8 +748,6 @@ void mcpPinsRead() {
   }
 
   if (pulserTriggerSelectOld != pulserTriggerSelect) {  //2 = pulser, 3 = clock, 1 = sequencer
-    Serial.print("pulserTriggerSelect ");
-    Serial.println(pulserTriggerSelect);
     switch (pulserTriggerSelect) {
       case 2:
         pulserTriggerSource = PULSER_TRIGGER;
@@ -756,14 +760,8 @@ void mcpPinsRead() {
         break;
     }
   }
-  if (modOscAmFmOld != modOscAmFm) {  //0 = AM, 1 = FM
-    Serial.print("modOscAmFm ");
-    Serial.println(modOscAmFm);
-  }
 
   if (complexOscWaveformOld != complexOscWaveform) {  // 2 = small pulse, 3 = square, 1 = triangle
-    Serial.print("complexOscWaveform ");
-    Serial.println(complexOscWaveform);
 
     if (complexOscWaveform == 2) {
       complexOscBasis.SetPW(0.95f);
@@ -778,8 +776,6 @@ void mcpPinsRead() {
   }
 
   if (envelopeGenSig0SelectorOld != envelopeGenSig0Selector) {  // 2 = pulser, 3 = clock, 1 = sequencer
-    Serial.print("envelopeGenSig0Selector ");
-    Serial.println(envelopeGenSig0Selector);
     switch (envelopeGenSig0Selector) {
       case 2:
         envelopeGenSig0TriggerSource = PULSER_TRIGGER;
@@ -792,13 +788,8 @@ void mcpPinsRead() {
         break;
     }
   }
-  if (envelopeGenSig0LpgVcaOld != envelopeGenSig0LpgVca) {  // 0 = LPG, 1 = VCA
-    Serial.print("envelopeGenSig0LpgVca ");
-    Serial.println(envelopeGenSig0LpgVca);
-  }
+
   if (envelopeGenSig1SelectorOld != envelopeGenSig1Selector) {  // 2 = pulser, 3 = clock, 1 = sequencer
-    Serial.print("envelopeGenSig1Selector ");
-    Serial.println(envelopeGenSig1Selector);
     switch (envelopeGenSig1Selector) {
       case 2:
         envelopeGenSig1TriggerSource = PULSER_TRIGGER;
@@ -810,10 +801,6 @@ void mcpPinsRead() {
         envelopeGenSig1TriggerSource = sequencerTriggerSource;
         break;
     }
-  }
-  if (envelopeGenSig1LpgVcaOld != envelopeGenSig1LpgVca) {  // 0 = LPG, 1 = VCA
-    Serial.print("envelopeGenSig1LpgVca ");
-    Serial.println(envelopeGenSig1LpgVca);
   }
 
   sequencerTriggerOld = sequencerTrigger;
@@ -841,9 +828,39 @@ void analogsRead() {
   avAnComplexoscAttenuator.updateValue(analogRead(AN_COMPLEXOSC_ATTENUATOR));
   avAnEnvelopegenSig0decay.updateValue(analogRead(AN_ENVELOPEGEN_SIG0DECAY));
   avAnEnvelopegenSig1decay.updateValue(analogRead(AN_ENVELOPEGEN_SIG1DECAY));
-  
-  envelopeGenSlopeShape = analogeToEnvelopeShapeIndex(analogRead(AN_ENVELOPEGEN_SLOPESHAPE));
-  //(int)simpleAnalogReadAndMap(AN_ENVELOPEGEN_SLOPESHAPE, 0, 6);
+
+  avAnEnvelopeShape.updateValue(analogRead(AN_ENVELOPEGEN_SLOPESHAPE));
+
+  if (avAnEnvelopeShape.hasValueUpdated()) {
+    //shapeALowerBound = 1023
+    uint16_t shapeAHigherBound = 723;
+    uint16_t shapeBLowerBound = 300;
+    //shapeBHigherBound = 0
+    float lowerSlopeFactor = 0.01f;
+    float higherSLopeFactor = 0.99f;
+
+    uint32_t rawVal = avAnEnvelopeShape.getVal();
+
+    if (rawVal > shapeAHigherBound) {  // from 1023 to 723, goes from 0.1 to 0.9 using shape A
+      float tmpVal = map(rawVal, 1023, shapeAHigherBound, 0, 1023) / 1023.0f;
+      slopeFactor = fmap(tmpVal, lowerSlopeFactor, higherSLopeFactor, Mapping::LINEAR);
+      slopeMorphFactor = 0.0f;
+    } else if (rawVal > shapeBLowerBound) {  // from 723 to 300 stay at 0.9 but pass from shape A, to shape B
+      slopeFactor = higherSLopeFactor;
+
+      float tmpVal = map(rawVal, shapeAHigherBound, shapeBLowerBound, 0, 1023) / 1023.0f;
+      slopeMorphFactor = fmap(tmpVal, 0.0f, 1.0f, Mapping::LINEAR);
+
+    } else {  // from 0 t0 300, goes from 0.9 to 0. using shape B
+      float tmpVal = map(rawVal, shapeBLowerBound, 0, 1023, 0) / 1023.0f;
+      slopeFactor = fmap(tmpVal, lowerSlopeFactor, higherSLopeFactor, Mapping::LINEAR);
+      slopeMorphFactor = 1.0f;
+    }
+
+    multiShapeAdsr0.setShapeFactor(1.0f-slopeMorphFactor, slopeMorphFactor);
+    multiShapeAdsr1.setShapeFactor(1.0f-slopeMorphFactor, slopeMorphFactor);
+
+  }
 
   modOscWaveform = simpleAnalogNormalize(avAnModoscWaveform.getVal());
   modOscAttenuator = simpleAnalogNormalize(avAnModoscAttenuator.getVal());
@@ -882,12 +899,10 @@ void analogsRead() {
       envelopeGenSig0DecayFactor = envelopeGenSig0Decay * 2.0f;
       if (envelope0Enable == false) {
         envelope0Enable = true;
-        Serial.println("Enable envelope 0");
       }
     } else {
       if (envelope0Enable == true) {
         envelope0Enable = false;
-        Serial.println("Disable envelope 0");
       }
       // mean decay is at its max, start to play with volume
       envelopeGenSig0DecayFactor = 1.0f;
@@ -907,12 +922,10 @@ void analogsRead() {
       envelopeGenSig1DecayFactor = envelopeGenSig1Decay * 2.0f;
       if (envelope1Enable == false) {
         envelope1Enable = true;
-        Serial.println("Enable envelope 1");
       }
     } else {
       if (envelope1Enable == true) {
         envelope1Enable = false;
-        Serial.println("Disable envelope 1");
       }
       // mean decay is at its max, start to play with volume
       envelopeGenSig1DecayFactor = 1.0f;
@@ -921,91 +934,6 @@ void analogsRead() {
       envelopeGenSig1Volume = 2.0f * (1.0f - envelopeGenSig1Decay);
     }
     envelopeGenSig1DecayOld = envelopeGenSig1Decay;
-  }
-
-  if (envelopeGenSlopeShape != envelopeGenSlopeShapeOld) {
-    Serial.print("envelopeGenSlopeShape: ");
-    Serial.println(envelopeGenSlopeShape);
-    switch (envelopeGenSlopeShape) {
-      case 0:
-        {
-          multiShapeAdsr0.setAttackShape(QUADRATIC_SHAPE);
-          multiShapeAdsr0.setDecayShape(QUADRATIC_INVERT_SHAPE);
-          multiShapeAdsr0.setReleaseShape(QUADRATIC_INVERT_SHAPE);
-
-          multiShapeAdsr1.setAttackShape(QUADRATIC_SHAPE);
-          multiShapeAdsr1.setDecayShape(QUADRATIC_INVERT_SHAPE);
-          multiShapeAdsr1.setReleaseShape(QUADRATIC_INVERT_SHAPE);
-          break;
-        }
-      case 1:
-        {
-          multiShapeAdsr0.setAttackShape(QUADRATIC_SHAPE);
-          multiShapeAdsr0.setDecayShape(QUADRATIC_SHAPE);
-          multiShapeAdsr0.setReleaseShape(QUADRATIC_SHAPE);
-
-          multiShapeAdsr1.setAttackShape(QUADRATIC_SHAPE);
-          multiShapeAdsr1.setDecayShape(QUADRATIC_SHAPE);
-          multiShapeAdsr1.setReleaseShape(QUADRATIC_SHAPE);
-          break;
-        }
-      case 2:
-        {
-          multiShapeAdsr0.setAttackShape(QUADRATIC_INVERT_SHAPE);
-          multiShapeAdsr0.setDecayShape(QUADRATIC_INVERT_SHAPE);
-          multiShapeAdsr0.setReleaseShape(QUADRATIC_INVERT_SHAPE);
-
-          multiShapeAdsr1.setAttackShape(QUADRATIC_INVERT_SHAPE);
-          multiShapeAdsr1.setDecayShape(QUADRATIC_INVERT_SHAPE);
-          multiShapeAdsr1.setReleaseShape(QUADRATIC_INVERT_SHAPE);
-          break;
-        }
-      case 3:
-        {
-          multiShapeAdsr0.setAttackShape(LINEAR_SHAPE);
-          multiShapeAdsr0.setDecayShape(LINEAR_SHAPE);
-          multiShapeAdsr0.setReleaseShape(LINEAR_SHAPE);
-
-          multiShapeAdsr1.setAttackShape(LINEAR_SHAPE);
-          multiShapeAdsr1.setDecayShape(LINEAR_SHAPE);
-          multiShapeAdsr1.setReleaseShape(LINEAR_SHAPE);
-          break;
-        }
-      case 4:
-        {
-          multiShapeAdsr0.setAttackShape(LOGISTIC_SHAPE);
-          multiShapeAdsr0.setDecayShape(LOGISTIC_SHAPE);
-          multiShapeAdsr0.setReleaseShape(LOGISTIC_SHAPE);
-
-          multiShapeAdsr1.setAttackShape(LOGISTIC_SHAPE);
-          multiShapeAdsr1.setDecayShape(LOGISTIC_SHAPE);
-          multiShapeAdsr1.setReleaseShape(LOGISTIC_SHAPE);
-          break;
-        }
-      case 5:
-        {
-          multiShapeAdsr0.setAttackShape(QUADRATIC_INVERT_SHAPE);
-          multiShapeAdsr0.setDecayShape(QUADRATIC_INVERT_SHAPE);
-          multiShapeAdsr0.setReleaseShape(QUADRATIC_INVERT_SHAPE);
-
-          multiShapeAdsr1.setAttackShape(QUADRATIC_INVERT_SHAPE);
-          multiShapeAdsr1.setDecayShape(QUADRATIC_INVERT_SHAPE);
-          multiShapeAdsr1.setReleaseShape(QUADRATIC_INVERT_SHAPE);
-          break;
-        }
-      case 6:
-        {
-          multiShapeAdsr0.setAttackShape(QUADRATIC_INVERT_SHAPE);
-          multiShapeAdsr0.setDecayShape(QUADRATIC_SHAPE);
-          multiShapeAdsr0.setReleaseShape(QUADRATIC_SHAPE);
-
-          multiShapeAdsr1.setAttackShape(QUADRATIC_INVERT_SHAPE);
-          multiShapeAdsr1.setDecayShape(QUADRATIC_SHAPE);
-          multiShapeAdsr1.setReleaseShape(QUADRATIC_SHAPE);
-          break;
-        }
-    }
-    envelopeGenSlopeShapeOld = envelopeGenSlopeShape;
   }
 }
 
@@ -1054,25 +982,6 @@ float simpleAnalogReadAndMap(uint32_t pin, long min, long max) {
 
 float simpleAnalogMap(uint32_t value, long min, long max) {
   return map(1023 - value, 0, 1023, min, max);
-}
-
-//Compute the correct index to give to adsr
-//Put trigger by hand cause interpolation was not giving what I wanted :(
-int analogeToEnvelopeShapeIndex(uint32_t value) {
-  if (value > 990)
-    return 0;
-  else if (value > 830)
-    return 1;
-  else if (value > 610)
-    return 2;
-  else if (value > 400)
-    return 3;
-  else if (value > 200)
-    return 4;
-  else if (value > 30)
-    return 5;
-  else 
-    return 6;
 }
 
 int8_t capacitiveSensorTouch() {
@@ -1264,8 +1173,7 @@ void setPulserFrequency(float frequency) {
 
   if (frequency < 0.08f)
     frequency = 0.08;  //put 0.02 so overflow = 50000 --> which is 16 bits
-  Serial.print("puser frequency : ");
-  Serial.println(frequency);
+
   pulserFrequency = frequency;
   pulserPeriodSecond = 1 / pulserFrequency;
   //prescaler 16 bits, overflow 16bits
