@@ -50,6 +50,7 @@ AveragedAnalog avAnComplexoscFrequency(true);
 AveragedAnalog avAnComplexoscAttenuator;
 AveragedAnalog avAnEnvelopegenSig0decay;
 AveragedAnalog avAnEnvelopegenSig1decay;
+AveragedAnalog avAnEnvelopeShape;
 
 //Digital input gpio definition
 #define DI_MIDIIN 1
@@ -126,6 +127,9 @@ float envelopeGenSig1Volume = DEFAULT_VALUE;
 
 bool envelope0Enable = true;
 bool envelope1Enable = true;
+
+float slopeFactor = 0.0f;
+float slopeMorphFactor = 0.0f;
 
 // ditial pins value
 uint8_t sequencerSteps[5] = { 0, 0, 0, 0, 0 };
@@ -326,8 +330,10 @@ void OnTimerClockInterrupt() {
       }
       if (envelopeGenSig0TriggerSource == CLOCK_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
 
-        multiShapeAdsr0.setAttackTime(0.01f * (1.0f + envelopeGenSig0DecayFactor * 2.0f));
-        multiShapeAdsr0.setReleaseTime(clockPeriodSecond * envelopeGenSig0DecayFactor);
+        float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig0DecayFactor;
+      
+        multiShapeAdsr0.setAttackTime(fullTimeAttackRelease*slopeFactor);
+        multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease*(1.0f-slopeFactor));
         multiShapeAdsr0.retrigger();
       }
       if (envelopeGenSig1TriggerSource == CLOCK_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
@@ -650,14 +656,14 @@ void ProcessAudio(float **in, float **out, size_t size) {
       if (envelope1Enable) {
         if (envelopeGenSig1LpgVca == 0)  //LPG
         {
-          attenuatedComplexMixed = attenuatedComplexMixed + (lpgModulationMixed * envelopeGenSig1Volume)*modOscAttenuator;
+          attenuatedComplexMixed = attenuatedComplexMixed + (lpgModulationMixed * envelopeGenSig1Volume) * modOscAttenuator;
         } else  //VCA
         {
-          attenuatedComplexMixed = attenuatedComplexMixed + ((modulationOscSample * envelopeGenSig1Volume * attenuatedAdsr1Value))*modOscAttenuator;
+          attenuatedComplexMixed = attenuatedComplexMixed + ((modulationOscSample * envelopeGenSig1Volume * attenuatedAdsr1Value)) * modOscAttenuator;
         }
 
       } else
-        attenuatedComplexMixed = attenuatedComplexMixed + ((modulationOscSample * envelopeGenSig1Volume))*modOscAttenuator;
+        attenuatedComplexMixed = attenuatedComplexMixed + ((modulationOscSample * envelopeGenSig1Volume)) * modOscAttenuator;
     }
 
     float chorused = chorus.Process(attenuatedComplexMixed);
@@ -841,7 +847,43 @@ void analogsRead() {
   avAnComplexoscAttenuator.updateValue(analogRead(AN_COMPLEXOSC_ATTENUATOR));
   avAnEnvelopegenSig0decay.updateValue(analogRead(AN_ENVELOPEGEN_SIG0DECAY));
   avAnEnvelopegenSig1decay.updateValue(analogRead(AN_ENVELOPEGEN_SIG1DECAY));
-  
+
+  avAnEnvelopeShape.updateValue(analogRead(AN_ENVELOPEGEN_SLOPESHAPE));
+
+  if (avAnEnvelopeShape.hasValueUpdated()) {
+    //shapeALowerBound = 1023
+    uint16_t shapeAHigherBound = 723;
+    uint16_t shapeBLowerBound = 300;
+    //shapeBHigherBound = 0
+    float lowerSlopeFactor = 0.01f;
+    float higherSLopeFactor = 0.99f;
+
+    uint32_t rawVal = avAnEnvelopeShape.getVal();
+
+    if (rawVal > shapeAHigherBound) {  // from 1023 to 723, goes from 0.1 to 0.9 using shape A
+      float tmpVal = map(rawVal, 1023, shapeAHigherBound, 0, 1023) / 1023.0f;
+      slopeFactor = fmap(tmpVal, lowerSlopeFactor, higherSLopeFactor, Mapping::LINEAR);
+      slopeMorphFactor = 0.0f;
+    } else if (rawVal > shapeBLowerBound) {  // from 723 to 300 stay at 0.9 but pass from shape A, to shape B
+      slopeFactor = higherSLopeFactor;
+      
+      float tmpVal = map(rawVal, shapeAHigherBound, shapeBLowerBound, 0, 1023) / 1023.0f;
+      slopeMorphFactor = fmap(tmpVal, 0.0f, 1.0f, Mapping::LINEAR);
+
+    } else {  // from 0 t0 300, goes from 0.9 to 0. using shape B
+      float tmpVal = map(rawVal, shapeBLowerBound, 0, 1023, 0) / 1023.0f;
+      slopeFactor = fmap(tmpVal, lowerSlopeFactor, higherSLopeFactor, Mapping::LINEAR);
+      slopeMorphFactor = 1.0f;
+    }
+
+    Serial.print("avAnEnvelopeShape: ");
+    Serial.print(rawVal);
+    Serial.print(", slopeFactor: ");
+    Serial.print(slopeFactor);
+    Serial.print(", slopeMorphFactor: ");
+    Serial.println(slopeMorphFactor);
+  }
+
   envelopeGenSlopeShape = analogeToEnvelopeShapeIndex(analogRead(AN_ENVELOPEGEN_SLOPESHAPE));
   //(int)simpleAnalogReadAndMap(AN_ENVELOPEGEN_SLOPESHAPE, 0, 6);
 
@@ -926,6 +968,7 @@ void analogsRead() {
   if (envelopeGenSlopeShape != envelopeGenSlopeShapeOld) {
     Serial.print("envelopeGenSlopeShape: ");
     Serial.println(envelopeGenSlopeShape);
+    envelopeGenSlopeShape = 1; //TODO forced a shape 
     switch (envelopeGenSlopeShape) {
       case 0:
         {
@@ -1071,7 +1114,7 @@ int analogeToEnvelopeShapeIndex(uint32_t value) {
     return 4;
   else if (value > 30)
     return 5;
-  else 
+  else
     return 6;
 }
 
