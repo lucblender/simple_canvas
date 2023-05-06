@@ -13,7 +13,7 @@ using namespace daisysp;
 //#define TEST_SEQUENCER_STEPS_READ
 //#define TEST_ANALOGS_READ
 //#define TEST_CAPACITIVE_TOUCH_READ
-#define TEST_MCP_PINS_READ
+//#define TEST_MCP_PINS_READ
 //#define TEST_DIGITAL_PINS_READ
 
 #define AN_SEQUENCER_STEPANALOGIN A0
@@ -62,9 +62,9 @@ using namespace daisysp;
 #define DI_COMPLEXOSC_WAVEFORM1 9
 #define DI_ENVELOPEGEN_SIG0SELECTOR0 10
 #define DI_ENVELOPEGEN_SIG0SELECTOR1 11
-#define DI_ENVELOPEGEN_SIG0LPGVCA 12
-#define DI_ENVELOPEGEN_SIG1SELECTOR0 13
-#define DI_ENVELOPEGEN_SIG1SELECTOR1 14
+#define DI_ENVELOPEGEN_SIG1SELECTOR0 12
+#define DI_ENVELOPEGEN_SIG1SELECTOR1 13
+#define DI_ENVELOPEGEN_SIG0LPGVCA 14
 #define DI_ENVELOPEGEN_SIG1LPGVCA 15
 
 
@@ -181,8 +181,6 @@ void setup() {
 #ifdef TEST_NEOPIXELS
   pixels.begin();
   pixels.clear();  // Set all pixel colors to 'off'
-  pixels.fill(pixels.Color(20, 0, 0));
-  pixels.show();
 #endif
 
   // DAISY SETUP
@@ -193,7 +191,9 @@ void setup() {
 void loop() {
   // uncomment a line to do hardware test of specific part
 
-
+#ifdef TEST_NEOPIXELS
+  rgbNeopixels();
+#endif
 #ifdef TEST_SEQUENCER_STEPS_READ
   sequencerStepsRead();
 #endif
@@ -210,10 +210,28 @@ void loop() {
   digitalPinsread();
 #endif
 
-  delay(10);
+  delay(500);
 }
 
 void ProcessAudio(float **in, float **out, size_t size) {
+}
+
+void rgbNeopixels()
+{
+  Serial.print("Neopixels on PIN ");
+  Serial.println(DI_LEDS_DIN);
+  Serial.println("Set all leds to Red");
+  pixels.fill(pixels.Color(255, 0, 0));
+  pixels.show();
+  delay(500);
+  Serial.println("Set all leds to Green");
+  pixels.fill(pixels.Color(0, 255, 0));
+  pixels.show();
+  delay(500);
+  Serial.println("Set all leds to Blue");
+  pixels.fill(pixels.Color(0, 0, 255));
+  pixels.show();
+  Serial.println();
 }
 
 void digitalPinsread() {
@@ -223,16 +241,27 @@ void digitalPinsread() {
   sequencerStep3 = digitalRead(DI_SEQUENCER_STEP3);
   sequencerStep4 = digitalRead(DI_SEQUENCER_STEP4);
 
-  Serial.print("sequencerStep0 ");
-  Serial.print(sequencerStep0);
-  Serial.print(" ,sequencerStep1 ");
-  Serial.print(sequencerStep1);
-  Serial.print(" ,sequencerStep2 ");
-  Serial.print(sequencerStep2);
-  Serial.print(" ,sequencerStep3 ");
-  Serial.print(sequencerStep3);
-  Serial.print(" ,sequencerStep4 ");
+  Serial.print("PIN ");
+  Serial.print(DI_SEQUENCER_STEP0);
+  Serial.print(" | Sequencer step 1 | ");
+  Serial.println(sequencerStep0);
+  Serial.print("PIN ");
+  Serial.print(DI_SEQUENCER_STEP1);
+  Serial.print(" | Sequencer step 2 | ");
+  Serial.println(sequencerStep1);
+  Serial.print("PIN ");
+  Serial.print(DI_SEQUENCER_STEP2);
+  Serial.print(" | Sequencer step 3 | ");
+  Serial.println(sequencerStep2);
+  Serial.print("PIN ");
+  Serial.print(DI_SEQUENCER_STEP3);
+  Serial.print(" | Sequencer step 4 | ");
+  Serial.println(sequencerStep3);
+  Serial.print("PIN ");
+  Serial.print(DI_SEQUENCER_STEP4);
+  Serial.print(" | Sequencer step 5 | ");
   Serial.println(sequencerStep4);
+  Serial.println("");
 }
 
 void mcpPinsRead() {
@@ -253,49 +282,98 @@ void mcpPinsRead() {
   envelopeGenSig1Selector0 = mcp.digitalRead(DI_ENVELOPEGEN_SIG1SELECTOR0);
   envelopeGenSig1Selector1 = mcp.digitalRead(DI_ENVELOPEGEN_SIG1SELECTOR1);
   envelopeGenSig1LpgVca = mcp.digitalRead(DI_ENVELOPEGEN_SIG1LPGVCA);
+ 
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_SEQUENCER_TRIGGER);
+  Serial.print(" | Sequencer Trigger | ");
+  Serial.println(sequencerTrigger); 
 
-  Serial.print("sequencerTrigger ");
-  Serial.print(sequencerTrigger);
-  Serial.print(" ,sequencerStage0 ");
-  Serial.print(sequencerStage0);
-  Serial.print(" ,sequencerStage1 ");
-  Serial.print(sequencerStage1);
-  Serial.print(" ,randomTriggerSelect0 ");
-  Serial.print(randomTriggerSelect0);
-  Serial.print(" ,randomTriggerSelect1 ");
-  Serial.print(randomTriggerSelect1);
-  Serial.print(" ,pulserTriggerSelect0 ");
-  Serial.print(pulserTriggerSelect0);
-  Serial.print(" ,pulserTriggerSelect1 ");
-  Serial.print(pulserTriggerSelect1);
-  Serial.print(" ,modOscAmFm ");
-  Serial.print(modOscAmFm);
-  Serial.print(" ,complexOscWaveform0 ");
-  Serial.print(complexOscWaveform0);
-  Serial.print(" ,complexOscWaveform1 ");
-  Serial.print(complexOscWaveform1);
-  Serial.print(" ,envelopeGenSig0Selector0 ");
-  Serial.print(envelopeGenSig0Selector0);
-  Serial.print(" ,envelopeGenSig0Selector1 ");
-  Serial.print(envelopeGenSig0Selector1);
-  Serial.print(" ,envelopeGenSig0LpgVca ");
-  Serial.print(envelopeGenSig0LpgVca);
-  Serial.print(" ,envelopeGenSig1Selector0 ");
-  Serial.print(envelopeGenSig1Selector0);
-  Serial.print(" ,envelopeGenSig1Selector1 ");
-  Serial.print(envelopeGenSig1Selector1);
-  Serial.print(" ,envelopeGenSig1LpgVca ");
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_SEQUENCER_STAGE0);
+  Serial.print(" | Sequencer Stages 1/2 | ");
+  Serial.println(sequencerStage0); 
+
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_SEQUENCER_STAGE1);
+  Serial.print(" | Sequencer Stages 2/2 | ");
+  Serial.println(sequencerStage1); 
+
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_RANDOM_TRIGGERSELECT0);
+  Serial.print(" | Random Trigger Select 1/2 | ");
+  Serial.println(randomTriggerSelect0); 
+
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_RANDOM_TRIGGERSELECT1);
+  Serial.print(" | Random Trigger Select 2/2 | ");
+  Serial.println(randomTriggerSelect1); 
+
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_PULSER_TRIGGERSELECT0);
+  Serial.print(" | Pulser Trigger Select 1/2 | ");
+  Serial.println(pulserTriggerSelect0);
+   
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_PULSER_TRIGGERSELECT1);
+  Serial.print(" | Pulser Trigger Select 2/2 | ");
+  Serial.println(pulserTriggerSelect1); 
+
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_MODOSC_AMFM);
+  Serial.print(" | Modulation Osc AM/FM | ");
+  Serial.println(modOscAmFm);
+   
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_COMPLEXOSC_WAVEFORM0);
+  Serial.print(" | Complex Osc Waveform 1/2 | ");
+  Serial.println(complexOscWaveform0);
+   
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_COMPLEXOSC_WAVEFORM1);
+  Serial.print(" | Complex Osc Waveform 2/2 | ");
+  Serial.println(complexOscWaveform1);
+   
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_ENVELOPEGEN_SIG0SELECTOR0);
+  Serial.print(" | Envelope A Source 1/2 | ");
+  Serial.println(envelopeGenSig0Selector0);
+   
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_ENVELOPEGEN_SIG0SELECTOR1);
+  Serial.print(" | Envelope A Source 2/2 | ");
+  Serial.println(envelopeGenSig0Selector1);
+   
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_ENVELOPEGEN_SIG0LPGVCA);
+  Serial.print(" | Envelope A VCA/LPG | ");
+  Serial.println(envelopeGenSig0LpgVca);
+   
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_ENVELOPEGEN_SIG1SELECTOR0);
+  Serial.print(" | Envelope B Source 1/2 | ");
+  Serial.println(envelopeGenSig1Selector0);
+   
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_ENVELOPEGEN_SIG1SELECTOR1);
+  Serial.print(" | Envelope B Source 2/2 | ");
+  Serial.println(envelopeGenSig1Selector1);
+   
+  Serial.print("MCP2307 PIN ");
+  Serial.print(DI_ENVELOPEGEN_SIG1LPGVCA);
+  Serial.print(" | Envelope B VCA/LPG | ");
   Serial.println(envelopeGenSig1LpgVca);
+  Serial.println("");
 }
 
 void capacitiveTouchRead() {
   uint16_t mpr121Touched = cap.touched();
-  Serial.println(mpr121Touched, BIN);
-  for (int i = 0; i < 12; i++) {
+  Serial.println("Capacitives value are arround 100-200 when not touched and below 80 when touched");
+  for (int i = 0; i < 9; i++) {
+    Serial.print("Capacitive pad n°");
     Serial.print(i);
-    Serial.print(" : ");
+    Serial.print(" value : ");
     Serial.print(cap.filteredData(i));
-    Serial.print(", ");
+    Serial.println("");
   }
   Serial.println("");
 }
@@ -312,33 +390,70 @@ void analogsRead() {
   envelopeGenSig0Decay = simpleAnalogRead(AN_ENVELOPEGEN_SIG0DECAY);
   envelopeGenSig1Decay = simpleAnalogRead(AN_ENVELOPEGEN_SIG1DECAY);
   envelopeGenSlopeShape = simpleAnalogRead(AN_ENVELOPEGEN_SLOPESHAPE);
+  
+  Serial.print("PIN 16");
+  Serial.print(" or A1");
+  Serial.print(" | Clock Rate | ");
+  Serial.println(clockRate);
 
-  Serial.print("clockRate ");
-  Serial.print(clockRate);
-  Serial.print("envelopeGenSig1Decay ");
-  Serial.print(envelopeGenSig1Decay);
-  Serial.print("envelopeGenSlopeShape ");
-  Serial.print(envelopeGenSlopeShape);
-  Serial.print("pulserPeriod ");
-  Serial.print(pulserPeriod);
-  Serial.print("modOscFrequency ");
-  Serial.print(modOscFrequency);
-  Serial.print("modOscWaveform ");
-  Serial.print(modOscWaveform);
-  Serial.print("modOscAttenuator ");
-  Serial.print(modOscAttenuator);
-  Serial.print("complexOscTimbre ");
-  Serial.print(complexOscTimbre);
-  Serial.print("complexOscFrequency ");
-  Serial.print(complexOscFrequency);
-  Serial.print("complexOscAttenuator ");
-  Serial.print(complexOscAttenuator);
-  Serial.print("envelopeGenSig0Decay ");
+  Serial.print("PIN 17");
+  Serial.print(" or A2");
+  Serial.print(" | Pulser Period | ");
+  Serial.println(pulserPeriod);
+
+  
+  Serial.print("PIN 18");
+  Serial.print(" or A3");
+  Serial.print(" | Modulation Osc Frequency | ");
+  Serial.println(modOscFrequency);
+  
+  Serial.print("PIN 19");
+  Serial.print(" or A4");
+  Serial.print(" | Modulation Osc Waveform| ");
+  Serial.println(modOscWaveform);
+  
+  Serial.print("PIN 20");
+  Serial.print(" or A5");
+  Serial.print(" | Modulation Osc Attenuator | ");
+  Serial.println(modOscAttenuator);
+  
+  Serial.print("PIN 21");
+  Serial.print(" or A6");
+  Serial.print(" | Complex Osc timbre | ");
+  Serial.println(complexOscTimbre);
+  
+  Serial.print("PIN 22");
+  Serial.print(" or A7");
+  Serial.print(" | Complex Osc Frequency | ");
+  Serial.println(complexOscFrequency);
+  
+  Serial.print("PIN 23");
+  Serial.print(" or A8");
+  Serial.print(" | Complex Osc Attenuator | ");
+  Serial.println(complexOscAttenuator);
+  
+  Serial.print("PIN 24");
+  Serial.print(" or A9");
+  Serial.print(" | Envelope A decay | ");
   Serial.println(envelopeGenSig0Decay);
+  
+  Serial.print("PIN 25");
+  Serial.print(" or A10");
+  Serial.print(" | Envelope B decy | ");
+  Serial.println(envelopeGenSig1Decay);
+  
+  Serial.print("PIN 28");
+  Serial.print(" or A11");
+  Serial.print(" | Envelope Slope | ");
+  Serial.println(envelopeGenSlopeShape);
+  Serial.println("");
 }
 
 void sequencerStepsRead() {
-
+  Serial.print("PIN 15");
+  Serial.print(" or A0");
+  Serial.println(" | Sequencer");
+  Serial.println("Sequencer values goes from ~20 to ~900 due to diode voltage drop");
   //start with all pins to 0
   for (int i = 0; i < 5; i++) {
 
@@ -356,11 +471,15 @@ void sequencerStepsRead() {
     pinMode(DI_SEQUENCER_STEPSELECT[indexRead], OUTPUT);
     digitalWrite(DI_SEQUENCER_STEPSELECT[indexRead], 1);
     sequencerStepAnalogIn[indexRead] = analogRead(AN_SEQUENCER_STEPANALOGIN);
-    Serial.print("Read step ");
-    Serial.print(indexRead);
-    Serial.print(" : ");
+
+    Serial.print("Setting PIN ");
+    Serial.print(DI_SEQUENCER_STEPSELECT[indexRead]);
+    Serial.print(" to 1");
+    Serial.print(" | Sequencer Step ");
+    Serial.print(indexRead+1);
+    Serial.print(" | ");
     Serial.print(sequencerStepAnalogIn[indexRead]);
-    Serial.print(" ");
+    Serial.println("");
   }
   Serial.println();
 }

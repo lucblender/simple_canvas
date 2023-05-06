@@ -134,7 +134,7 @@ The _Led_holder_source_ is a bit tricky to install. The 3D-printed holder is mad
 The _Led_holder_main_ is easier to put, it will clip itself thanks to some switch. The _Blocker_destination_ will clip itself on the _Led_holder_main_ piece.
 
 Finally, you can solder the 1st led to some VCC, GND, and the DIN according to the cheat sheet. Search for neopixel as component type.
-You can test all the leds with the test code by uncommenting l112 ```#define TEST_NEOPIXELS```. All leds are turned on in a light red.
+You can test all the leds with the test code by uncommenting l112 ```#define TEST_NEOPIXELS```. All leds are turned on in cycle going from all red, all green, all blue.
 
 ##### Leds noise
 
