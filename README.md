@@ -1,6 +1,6 @@
 # Simple Micro Easel
 
-![Simple Micro Easel Picture](resources/pictures/DSC01556-post.jpg)
+![Simple Micro Easel Picture](resources/pictures/DSC01556-post.png)
 
 # Description
 
