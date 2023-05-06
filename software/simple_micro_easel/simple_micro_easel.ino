@@ -545,11 +545,11 @@ void ProcessAudio(float **in, float **out, size_t size) {
   float factorSig1Adsr;
 
   // computation to do only once per processAudio pass
-  if (envelopeGenSig0DecayFactor > 0.75f) {
-    // envelopeGenSig0DecayFactor 0.75 .. 1
+  if (envelopeGenSig0DecayFactor > 0.875f) {
+    // envelopeGenSig0DecayFactor 0.875f .. 1
     // offsetSig0Adsr 0 .. 1
     // factorSig0Adsr 1 .. 0
-    offsetSig0Adsr = 1.0f - (4.0f * (1.0f - envelopeGenSig0DecayFactor));
+    offsetSig0Adsr = 1.0f - (8.0f * (1.0f - envelopeGenSig0DecayFactor));
     factorSig0Adsr = 1.0f - offsetSig0Adsr;
 
   } else {
@@ -557,11 +557,11 @@ void ProcessAudio(float **in, float **out, size_t size) {
     factorSig0Adsr = 1.0f;
   }
 
-  if (envelopeGenSig1DecayFactor > 0.75f) {
-    // envelopeGenSig1DecayFactor 0.75 .. 1
+  if (envelopeGenSig1DecayFactor > 0.875f) {
+    // envelopeGenSig1DecayFactor 0.875f .. 1
     // offsetSig1Adsr 0 .. 1
     // factorSig1Adsr 1 .. 0
-    offsetSig1Adsr = 1.0f - (4.0f * (1.0f - envelopeGenSig1DecayFactor));
+    offsetSig1Adsr = 1.0f - (8.0f * (1.0f - envelopeGenSig1DecayFactor));
     factorSig1Adsr = 1.0f - offsetSig1Adsr;
   } else {
     offsetSig1Adsr = 0.0f;
@@ -896,7 +896,7 @@ void analogsRead() {
       envelopeGenSig0Volume = 1.0f;
       // start to play with envelope, volume is 100%
       // if envelopeGenSig0Decay is at its minimum, disable envelope
-      envelopeGenSig0DecayFactor = envelopeGenSig0Decay * 2.0f;
+      envelopeGenSig0DecayFactor = 1.0f-fmap(1.0f-(envelopeGenSig0Decay * 2.0f),0.0f, 1.0f, Mapping::EXP);
       if (envelope0Enable == false) {
         envelope0Enable = true;
       }
@@ -914,12 +914,13 @@ void analogsRead() {
   }
 
   if (avAnEnvelopegenSig1decay.hasValueUpdated()) {
+    
     envelopeGenSig1Decay = simpleAnalogNormalize(avAnEnvelopegenSig1decay.getVal());
     if (envelopeGenSig1Decay < 0.5f) {
 
       envelopeGenSig1Volume = 1.0f;
       // start to play with envelope, volume is 100%
-      envelopeGenSig1DecayFactor = envelopeGenSig1Decay * 2.0f;
+      envelopeGenSig1DecayFactor = 1.0f-fmap(1.0f-(envelopeGenSig1Decay * 2.0f),0.0f, 1.0f, Mapping::EXP);
       if (envelope1Enable == false) {
         envelope1Enable = true;
       }
