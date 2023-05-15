@@ -9,6 +9,7 @@ using namespace daisysp;
 
 #include "MorphingMultiShapeAdsr.h"
 #include "AveragedAnalog.h"
+#include <MIDI.h>
 
 #define DEBUG
 #ifdef DEBUG
@@ -54,7 +55,7 @@ AveragedAnalog avAnEnvelopeShape;
 
 //Digital input gpio definition
 #define DI_MIDIIN 1
-#define DI_MIDIOUT 2
+#define DI_SYNC_IN 2
 #define DI_SEQUENCER_STEPSELECT0 4
 #define DI_SEQUENCER_STEPSELECT1 3
 #define DI_SEQUENCER_STEPSELECT2 29
@@ -302,50 +303,78 @@ float randomVoltageValue = 0.0f;
 float adsr0Value = 0.0f;
 float adsr1Value = 0.0f;
 
-float clockValue = 0.0f;
+
+// ----------------- MIDI and sync ---------------------------
+enum CLOCK_TRIGGER_SOURCE { NATIVE_TRIGGER_SOURCE = 0,
+                            SYNC_TRIGGER_SOURCE = 1,
+                            MIDI_TRIGGER_SOURCE = 2 };
+
+
+int currentClockTriggerSource = MIDI_TRIGGER_SOURCE;
+
+HardwareSerial SerialMidi(DI_MIDIIN, DI_SYNC_IN);  //DI_SYNC_IN will be overriden as a gpio input
+MIDI_CREATE_INSTANCE(HardwareSerial, SerialMidi, myMidi);
+
+
+enum TIME_DIVISION{ONE_FOURTH=24,
+            ONE_FOURTH_T=16,
+            ONE_EIGHTH=12,
+            ONE_EIGHTH_T=8,
+            ONE_SIXTEENTH=6,
+            ONE_SIXTEENTH_T=4,
+            ONE_THIRTYSECOND=3,
+            ONE_THIRTYSECOND_T=2};
+
+int8_t midiCounter = 0;
+int currentTimeDiv = ONE_FOURTH;
+
+
+
 
 void OnTimerClockInterrupt() {
+  if (currentClockTriggerSource == NATIVE_TRIGGER_SOURCE) {
+    clockLogic();
+  }
+}
+
+void clockLogic() {
   if (skipNextClock == false) {
-    if (clockValue == 0.0f) {
-      if (sequencerTriggerSource == SEQ_CLOCK_TRIGGER) {
-        sequencerCurrentStepRead();
-        if (sequencerSteps[sequencerIndex] == 1)
-          currentSequencerStepEnable = false;
-        else
-          currentSequencerStepEnable = true;
-        setSequencerLed(sequencerIndex);
-        sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
-      }
-      clockValue = 1.0f;
-
-      if (pulserTriggerSource == CLOCK_TRIGGER || (pulserTriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
-        pulserValue = 1.0f;
-        setPulserLed(true);
-      }
-      if (randomVoltageTriggerSource == CLOCK_TRIGGER || (randomVoltageTriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
-        generateRandomVoltage();
-        setRandomLed(randomVoltageValue);
-      }
-      if (envelopeGenSig0TriggerSource == CLOCK_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
-
-        float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig0DecayFactor;
-
-        multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
-        multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
-        multiShapeAdsr0.retrigger();
-      }
-      if (envelopeGenSig1TriggerSource == CLOCK_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
-
-        float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig1DecayFactor;
-
-        multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
-        multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
-        multiShapeAdsr1.retrigger();
-        setEnvelopeLed(true);
-      }
-    } else {
-      clockValue = 0.0f;
+    if (sequencerTriggerSource == SEQ_CLOCK_TRIGGER) {
+      sequencerCurrentStepRead();
+      if (sequencerSteps[sequencerIndex] == 1)
+        currentSequencerStepEnable = false;
+      else
+        currentSequencerStepEnable = true;
+      setSequencerLed(sequencerIndex);
+      sequencerIndex = (sequencerIndex + 1) % sequencerLenght;
     }
+
+    if (pulserTriggerSource == CLOCK_TRIGGER || (pulserTriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
+      pulserValue = 1.0f;
+      setPulserLed(true);
+    }
+    if (randomVoltageTriggerSource == CLOCK_TRIGGER || (randomVoltageTriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
+      generateRandomVoltage();
+      setRandomLed(randomVoltageValue);
+    }
+    if (envelopeGenSig0TriggerSource == CLOCK_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
+
+      float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig0DecayFactor;
+
+      multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
+      multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
+      multiShapeAdsr0.retrigger();
+    }
+    if (envelopeGenSig1TriggerSource == CLOCK_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
+
+      float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig1DecayFactor;
+
+      multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
+      multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
+      multiShapeAdsr1.retrigger();
+      setEnvelopeLed(true);
+    }
+
 
     if (avAnClockRate.hasValueUpdated()) {
       clockRate = simpleAnalogNormalize(avAnClockRate.getVal()) * 3.0f;  //0..3Hz = 0..180 bpm
@@ -405,10 +434,25 @@ void OnTimerPulserInterrupt() {
   }
 }
 
+void testCallback() {
+
+  if (currentClockTriggerSource == SYNC_TRIGGER_SOURCE) {
+    clockLogic();
+  }
+}
+
 void setup() {
   // put your setup code here, to run once:
 
   Serial.begin(115200);
+
+  myMidi.setHandleNoteOn(handleNoteOn);
+  myMidi.setHandleNoteOff(handleNoteOff);
+  myMidi.setHandleClock(handleClock);
+  myMidi.setHandleStart(handleStart);
+  myMidi.setHandleContinue(handleContinue);
+  myMidi.setHandleStop(handleStop);
+  myMidi.begin(MIDI_CHANNEL_OMNI);
 
 
   pinMode(DI_PATCH_IRQ, INPUT);
@@ -451,6 +495,9 @@ void setup() {
 
   pinMode(DI_INTB, INPUT);
   pinMode(DI_INTA, INPUT);
+
+  pinMode(DI_SYNC_IN, INPUT);
+  attachInterrupt(DI_SYNC_IN, testCallback, FALLING);
 
   pinMode(DI_SEQUENCER_STEP4, INPUT_PULLUP);
   pinMode(DI_SEQUENCER_STEP3, INPUT_PULLUP);
@@ -529,6 +576,8 @@ void setup() {
 }
 
 void loop() {
+
+  myMidi.read();
   capacitiveStateMachine();
   digitalPinsread();
   mcpPinsRead();
@@ -536,6 +585,36 @@ void loop() {
   updateTimedLeds();
 }
 
+
+void handleNoteOn(byte inChannel, byte inNote, byte inVelocity) {
+  Serial.println("handleNoteOn");
+}
+
+void handleNoteOff(byte inChannel, byte inNote, byte inVelocity) {
+  Serial.println("handleNoteOff");
+}
+
+void handleClock() {
+  Serial.println("handleClock");
+  
+  if(midiCounter%currentTimeDiv == 0){    
+    if (currentClockTriggerSource == MIDI_TRIGGER_SOURCE) {
+      clockLogic();
+    }
+  }
+  midiCounter = (midiCounter+1)%48;
+}
+void handleStart(void) {
+  Serial.println("handleStart");
+  midiCounter = 0;
+}
+void handleContinue(void) {
+  Serial.println("handleContinue");
+}
+void handleStop(void) {
+  Serial.println("handleStop");
+  midiCounter = 0;
+}
 
 void ProcessAudio(float **in, float **out, size_t size) {
   float offsetSig0Adsr;
@@ -896,7 +975,7 @@ void analogsRead() {
       envelopeGenSig0Volume = 1.0f;
       // start to play with envelope, volume is 100%
       // if envelopeGenSig0Decay is at its minimum, disable envelope
-      envelopeGenSig0DecayFactor = 1.0f-fmap(1.0f-(envelopeGenSig0Decay * 2.0f),0.0f, 1.0f, Mapping::EXP);
+      envelopeGenSig0DecayFactor = 1.0f - fmap(1.0f - (envelopeGenSig0Decay * 2.0f), 0.0f, 1.0f, Mapping::EXP);
       if (envelope0Enable == false) {
         envelope0Enable = true;
       }
@@ -914,13 +993,13 @@ void analogsRead() {
   }
 
   if (avAnEnvelopegenSig1decay.hasValueUpdated()) {
-    
+
     envelopeGenSig1Decay = simpleAnalogNormalize(avAnEnvelopegenSig1decay.getVal());
     if (envelopeGenSig1Decay < 0.5f) {
 
       envelopeGenSig1Volume = 1.0f;
       // start to play with envelope, volume is 100%
-      envelopeGenSig1DecayFactor = 1.0f-fmap(1.0f-(envelopeGenSig1Decay * 2.0f),0.0f, 1.0f, Mapping::EXP);
+      envelopeGenSig1DecayFactor = 1.0f - fmap(1.0f - (envelopeGenSig1Decay * 2.0f), 0.0f, 1.0f, Mapping::EXP);
       if (envelope1Enable == false) {
         envelope1Enable = true;
       }
@@ -1196,9 +1275,9 @@ void setClockFrequency(float frequency) {
 
   //frequency *2 to make a 50% duty cycle square signal
 
-  timerClock.setPrescaleFactor(40000);                  // = Set prescaler to 4800 => timer frequency = 200MHz / 40000  = 5000 Hz
-  timerClock.setOverflow(int(5000 / (frequency * 2)));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency
-  timerClock.refresh();                                 // Make register changes take effect
+  timerClock.setPrescaleFactor(40000);              // = Set prescaler to 4800 => timer frequency = 200MHz / 40000  = 5000 Hz
+  timerClock.setOverflow(int(5000 / (frequency)));  // Set overflow to 50000 => timer frequency = 10'000 Hz / frequency
+  timerClock.refresh();                             // Make register changes take effect
 }
 
 void pulserProcess() {
