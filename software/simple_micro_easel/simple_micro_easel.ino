@@ -307,23 +307,28 @@ float adsr1Value = 0.0f;
 // ----------------- MIDI and sync ---------------------------
 enum CLOCK_TRIGGER_SOURCE { NATIVE_TRIGGER_SOURCE = 0,
                             SYNC_TRIGGER_SOURCE = 1,
-                            MIDI_TRIGGER_SOURCE = 2 };
+                            MIDI_CLOCK_TRIGGER_SOURCE = 2,
+                            MIDI_KEY_TRIGGER_SOURCE = 3 };
 
 
-int currentClockTriggerSource = MIDI_TRIGGER_SOURCE;
+int currentClockTriggerSource = MIDI_CLOCK_TRIGGER_SOURCE;
 
 HardwareSerial SerialMidi(DI_MIDIIN, DI_SYNC_IN);  //DI_SYNC_IN will be overriden as a gpio input
 MIDI_CREATE_INSTANCE(HardwareSerial, SerialMidi, myMidi);
+bool isMidiReadAvailable = true;
 
+bool useMidiComplexOsc = true;
+bool useMidiModOsc = true;
+float midiFreq;
 
-enum TIME_DIVISION{ONE_FOURTH=24,
-            ONE_FOURTH_T=16,
-            ONE_EIGHTH=12,
-            ONE_EIGHTH_T=8,
-            ONE_SIXTEENTH=6,
-            ONE_SIXTEENTH_T=4,
-            ONE_THIRTYSECOND=3,
-            ONE_THIRTYSECOND_T=2};
+enum TIME_DIVISION { ONE_FOURTH = 24,
+                     ONE_FOURTH_T = 16,
+                     ONE_EIGHTH = 12,
+                     ONE_EIGHTH_T = 8,
+                     ONE_SIXTEENTH = 6,
+                     ONE_SIXTEENTH_T = 4,
+                     ONE_THIRTYSECOND = 3,
+                     ONE_THIRTYSECOND_T = 2 };
 
 int8_t midiCounter = 0;
 int currentTimeDiv = ONE_FOURTH;
@@ -434,7 +439,7 @@ void OnTimerPulserInterrupt() {
   }
 }
 
-void testCallback() {
+void syncInCallback() {
 
   if (currentClockTriggerSource == SYNC_TRIGGER_SOURCE) {
     clockLogic();
@@ -497,7 +502,7 @@ void setup() {
   pinMode(DI_INTA, INPUT);
 
   pinMode(DI_SYNC_IN, INPUT);
-  attachInterrupt(DI_SYNC_IN, testCallback, FALLING);
+  attachInterrupt(DI_SYNC_IN, syncInCallback, FALLING);
 
   pinMode(DI_SEQUENCER_STEP4, INPUT_PULLUP);
   pinMode(DI_SEQUENCER_STEP3, INPUT_PULLUP);
@@ -578,6 +583,7 @@ void setup() {
 void loop() {
 
   myMidi.read();
+
   capacitiveStateMachine();
   digitalPinsread();
   mcpPinsRead();
@@ -587,25 +593,30 @@ void loop() {
 
 
 void handleNoteOn(byte inChannel, byte inNote, byte inVelocity) {
-  Serial.println("handleNoteOn");
+  Serial.print("handleNoteOn ");
+  Serial.println(inNote);
+
+  if (currentClockTriggerSource == MIDI_KEY_TRIGGER_SOURCE) {
+    clockLogic();
+  }
+  midiFreq = semitone_to_hertz(inNote - 57);
 }
 
 void handleNoteOff(byte inChannel, byte inNote, byte inVelocity) {
-  Serial.println("handleNoteOff");
+  //Serial.println("handleNoteOff");
 }
 
 void handleClock() {
-  Serial.println("handleClock");
-  
-  if(midiCounter%currentTimeDiv == 0){    
-    if (currentClockTriggerSource == MIDI_TRIGGER_SOURCE) {
+ if (currentClockTriggerSource == MIDI_CLOCK_TRIGGER_SOURCE) {
+    if (midiCounter % currentTimeDiv == 0) {
       clockLogic();
     }
+    midiCounter = (midiCounter + 1) % 48;
   }
-  midiCounter = (midiCounter+1)%48;
 }
 void handleStart(void) {
   Serial.println("handleStart");
+
   midiCounter = 0;
 }
 void handleContinue(void) {
@@ -617,6 +628,7 @@ void handleStop(void) {
 }
 
 void ProcessAudio(float **in, float **out, size_t size) {
+  
   float offsetSig0Adsr;
   float factorSig0Adsr;
 
@@ -757,6 +769,7 @@ void ProcessAudio(float **in, float **out, size_t size) {
     out[0][i] = attenuatedComplexMixed;
     out[1][i] = chorused;
   }
+  
 }
 
 void digitalPinsread() {
@@ -772,18 +785,21 @@ void digitalPinsread() {
     };
   }
 }
-
+uint8_t mcpMaskFromBulk(uint16_t value, uint8_t addr){
+  return ((value >>addr)&0x01);
+}
 void mcpPinsRead() {
-  sequencerTrigger = mcp.digitalRead(DI_SEQUENCER_TRIGGER);
-  sequencerStage = mcp.digitalRead(DI_SEQUENCER_STAGE0) + 2 * mcp.digitalRead(DI_SEQUENCER_STAGE1);
-  randomTriggerSelect = mcp.digitalRead(DI_RANDOM_TRIGGERSELECT0) + 2 * mcp.digitalRead(DI_RANDOM_TRIGGERSELECT1);
-  pulserTriggerSelect = mcp.digitalRead(DI_PULSER_TRIGGERSELECT0) + 2 * mcp.digitalRead(DI_PULSER_TRIGGERSELECT1);
-  modOscAmFm = mcp.digitalRead(DI_MODOSC_AMFM);
-  complexOscWaveform = mcp.digitalRead(DI_COMPLEXOSC_WAVEFORM0) + 2 * mcp.digitalRead(DI_COMPLEXOSC_WAVEFORM1);
-  envelopeGenSig0Selector = mcp.digitalRead(DI_ENVELOPEGEN_SIG0SELECTOR0) + 2 * mcp.digitalRead(DI_ENVELOPEGEN_SIG0SELECTOR1);
-  envelopeGenSig0LpgVca = mcp.digitalRead(DI_ENVELOPEGEN_SIG0LPGVCA);
-  envelopeGenSig1Selector = mcp.digitalRead(DI_ENVELOPEGEN_SIG1SELECTOR0) + 2 * mcp.digitalRead(DI_ENVELOPEGEN_SIG1SELECTOR1);
-  envelopeGenSig1LpgVca = mcp.digitalRead(DI_ENVELOPEGEN_SIG1LPGVCA);
+  uint16_t bulkReadValue = mcp.readGPIOAB();
+  sequencerTrigger = mcpMaskFromBulk(bulkReadValue, DI_SEQUENCER_TRIGGER);// mcp.digitalRead(DI_SEQUENCER_TRIGGER);
+  sequencerStage = mcpMaskFromBulk(bulkReadValue, DI_SEQUENCER_STAGE0) + 2 * mcpMaskFromBulk(bulkReadValue, DI_SEQUENCER_STAGE1);//mcp.digitalRead(DI_SEQUENCER_STAGE0) + 2 * mcp.digitalRead(DI_SEQUENCER_STAGE1);
+  randomTriggerSelect = mcpMaskFromBulk(bulkReadValue, DI_RANDOM_TRIGGERSELECT0) + 2 * mcpMaskFromBulk(bulkReadValue, DI_RANDOM_TRIGGERSELECT1);//mcp.digitalRead(DI_RANDOM_TRIGGERSELECT0) + 2 * mcp.digitalRead(DI_RANDOM_TRIGGERSELECT1);
+  pulserTriggerSelect = mcpMaskFromBulk(bulkReadValue, DI_PULSER_TRIGGERSELECT0) + 2 * mcpMaskFromBulk(bulkReadValue, DI_PULSER_TRIGGERSELECT1);
+  modOscAmFm = mcpMaskFromBulk(bulkReadValue, DI_MODOSC_AMFM);
+  complexOscWaveform = mcpMaskFromBulk(bulkReadValue, DI_COMPLEXOSC_WAVEFORM0) + 2 * mcpMaskFromBulk(bulkReadValue, DI_COMPLEXOSC_WAVEFORM1);
+  envelopeGenSig0Selector = mcpMaskFromBulk(bulkReadValue, DI_ENVELOPEGEN_SIG0SELECTOR0) + 2 * mcpMaskFromBulk(bulkReadValue, DI_ENVELOPEGEN_SIG0SELECTOR1);
+  envelopeGenSig0LpgVca = mcpMaskFromBulk(bulkReadValue, DI_ENVELOPEGEN_SIG0LPGVCA);
+  envelopeGenSig1Selector = mcpMaskFromBulk(bulkReadValue, DI_ENVELOPEGEN_SIG1SELECTOR0) + 2 * mcpMaskFromBulk(bulkReadValue, DI_ENVELOPEGEN_SIG1SELECTOR1);
+  envelopeGenSig1LpgVca = mcpMaskFromBulk(bulkReadValue, DI_ENVELOPEGEN_SIG1LPGVCA);
 
   if (sequencerTriggerOld != sequencerTrigger) {  // 0 clock, 1 pulser
     if (sequencerTrigger == 0)
@@ -1067,15 +1083,10 @@ float simpleAnalogMap(uint32_t value, long min, long max) {
 int8_t capacitiveSensorTouch() {
 
   int8_t touchedIndex = -1;
-
+  uint16_t mpr121Touched = cap.touched();
   // get sensor value
   for (int i = 0; i < TOTAL_TOUCH_COUNT; i++) {
-    capacitiveSensorRawValue[i] = cap.filteredData(i);
-    if (capacitiveSensorRawValue[i] > THRESHOLD_TOUCHED) {
-      capacitiveSensorTouched[i] = 0;
-    } else {
-      capacitiveSensorTouched[i] = 1;
-    }
+    capacitiveSensorTouched[i] = (mpr121Touched>>i)&0x01;
   }
 
   //detect if we have a touch
@@ -1227,6 +1238,9 @@ void setComplexOscillatorFrequency(float fmModulationFactor) {  //TODO
     finalFrequency = finalFrequency + finalFrequency * fmModulationFactor;
   }
 
+  if(useMidiComplexOsc)
+    finalFrequency = finalFrequency + midiFreq;
+
   complexOscBasis.SetFreq(finalFrequency);
   complexOscBasis.SetSyncFreq(finalFrequency);
   complexOscSinus.SetFreq(finalFrequency);
@@ -1244,6 +1258,9 @@ void setModulationOscillatorFrequency() {
   else {
     finalFrequency = modOscFrequency;
   }
+
+  if(useMidiModOsc)
+    finalFrequency = finalFrequency + midiFreq;
 
   modulationOsc.SetSyncFreq(finalFrequency);
   modulationOsc.SetFreq(finalFrequency);
