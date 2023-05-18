@@ -1,14 +1,14 @@
-# Instructions on how to build the simple micro easel
+# Instructions on how to build the Canvas
 
 ## Before you start
-In this document, you'll find the instructions to assemble the micro easel. The first step is to go check the [simple micro easel wiring cheat sheet](simple_micro_easel_wiring_cheat_sheet.pdf) print it, keep it by your side the whole building time, and add a little checkmark when you did put a wire. In this document, I'll refer to it as the "cheat sheet".
+In this document, you'll find the instructions to assemble the Canvas. The first step is to go check the [Canvas wiring cheat sheet](simple_canvas_wiring_cheat_sheet.pdf) print it, keep it by your side the whole building time, and add a little checkmark when you did put a wire. In this document, I'll refer to it as the "cheat sheet".
 
 On this cheat sheet, you have the main table with all the wiring and two side tables showing the pinout of the daisy and the MCP23017 gpio expander pinout.
 The main table top pin and bottom pin refer to the simple board pins (top and bottom rows). The "Daisy Pin" collum gives the real pin name. Note : there is also MCP23017 pin name in this collum, all the \_A0 to \_A7 and \_B0 to \_B7.
 
 ## Test Code
 
-A test code to help you debug your hardware can be found in the software folder and is named [simple_micro_easel_hardware_test.ino](software/simple_micro_easel_hardware_test/simple_micro_easel_hardware_test.ino). On top of the code l12 to l17, you can comment and uncomment the define to enable of disable tests, I'll refer to this code as the "test code".
+A test code to help you debug your hardware can be found in the software folder and is named [simple_canvas_hardware_test.ino](software/simple_canvas_hardware_test/simple_canvas_hardware_test.ino). On top of the code l12 to l17, you can comment and uncomment the define to enable of disable tests, I'll refer to this code as the "test code".
 
 ### Final result
 Here is the final result: 
