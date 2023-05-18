@@ -7,9 +7,14 @@ using namespace daisysp;
 
 #include <Adafruit_NeoPixel.h>
 
-//#include "MorphingMultiShapeAdsr.h"
+// if USE_MULTISHAPE_ADSR is defined, will use custom adsr class, if not, will use AD envelope from daisyduino
+#define USE_MULTISHAPE_ADSR
+
+#ifdef USE_MULTISHAPE_ADSR
+#include "MorphingMultiShapeAdsr.h"
+#endif
+
 #include "AveragedAnalog.h"
-#include <MIDI.h>
 
 #define DEBUG
 #ifdef DEBUG
@@ -184,12 +189,15 @@ float frequency = 440;
 float sample_rate;
 float half_sample_rate;
 
-// ---------------------- Custom modules ------------------------
+// ---------------------- ADSR ------------------------
 
-//MorphingMultiShapeAdsr multiShapeAdsr0;
-//MorphingMultiShapeAdsr multiShapeAdsr1;
+#ifdef USE_MULTISHAPE_ADSR
+MorphingMultiShapeAdsr multiShapeAdsr0;
+MorphingMultiShapeAdsr multiShapeAdsr1;
+#else
 AdEnv adEnv0;
 AdEnv adEnv1;
+#endif
 
 // ----------------- Capacitive sensor ---------------------------
 #define THRESHOLD_TOUCHED 95
@@ -317,7 +325,6 @@ enum CLOCK_TRIGGER_SOURCE { NATIVE_TRIGGER_SOURCE = 0,
 int currentClockTriggerSource = MIDI_KEY_TRIGGER_SOURCE;
 
 HardwareSerial SerialMidi(DI_MIDIIN, DI_SYNC_IN);  //DI_SYNC_IN will be overriden as a gpio input
-MIDI_CREATE_INSTANCE(HardwareSerial, SerialMidi, myMidi);
 bool isMidiReadAvailable = true;
 
 bool useMidiComplexOsc = true;
@@ -337,7 +344,108 @@ int8_t midiCounter = 0;
 int currentTimeDiv = ONE_FOURTH;
 
 
+// ----------------- new midi function --------------------------
 
+int ch = 0;
+int cmd = 0;
+int d1 = 0;
+int d2 = 0;
+int idx = -1;
+
+// The midi library recommended by arduino is too unstable to be used 
+// with interrupts as this project use a lot (timer and audio processing)
+// Made my own midi function convering python lib made by @diyelectromusic
+//  https://diyelectromusic.wordpress.com/
+
+void F(int mb) {
+  if (mb == 0xF8) {
+    handleClock();
+  } else if (mb == 0xFA) {
+    handleStart();
+  } else if (mb == 0xFC) {
+    handleStop();
+  } else if ((mb >= 0x80) && (mb <= 0xEF)) {
+    // MIDI Voice Category Message.
+    // Action: Start handling Running Status
+
+    // Extract the MIDI command and channel (1-16)
+    cmd = mb & 0xF0;
+    ch = 1 + mb & 0x0F;
+
+    // Initialise the two data bytes ready for processing
+    d1 = 0;
+    d2 = 0;
+  } else if ((mb >= 0xF0) and (mb <= 0xF7)) {
+    // MIDI System Common Category Message.
+    // These are not handled by this decoder.
+    // Action: Reset Running Status.
+    cmd = 0;
+  } else if ((mb >= 0xF8) and (mb <= 0xFF)) {
+    // System Real-Time Message.
+    // These are not handled by this decoder.
+    // Action: Ignore these.
+  } else {
+    // MIDI Data
+    if (cmd == 0) {
+      // No record of what state we're in, so can go no further
+      return;
+    }
+    if (cmd == 0x80) {
+      // Note OFF Received
+      if (d1 == 0) {
+        // Store the note number
+        d1 = mb;
+      } else {
+        // Already have the note, so store the level
+        d2 = mb;
+        handleNoteOff(ch, cmd, d1, d2, idx);
+        d1 = 0;
+        d2 = 0;
+      }
+    } else if (cmd == 0x90) {
+      // Note ON Received
+      if (d1 == 0) {
+        // Store the note number
+        d1 = mb;
+      } else {
+        // Already have the note, so store the level
+        d2 = mb;
+        // Special case if the level (data2) is zero - treat as NoteOff
+        if (d2 == 0) {
+          handleNoteOff(ch, cmd, d1, d2, idx);
+        } else {
+          handleNoteOn(ch, cmd, d1, d2, idx);
+        }
+        d1 = 0;
+        d2 = 0;
+      }
+    } else if (cmd == 0xC0) {
+      // Program Change
+      // This is a single data-byte message
+      d1 = mb;
+      handleThru(ch, cmd, d1, -1, idx);
+      d1 = 0;
+    } else if (cmd == 0xD0) {
+      // Channel Pressure
+      // This is a single data-byte message
+      d1 = mb;
+      handleThru(ch, cmd, d1, -1, idx);
+      d1 = 0;
+    } else {
+      // All other commands are two-byte data commands
+      if (d1 == 0) {
+        // Store the first data byte
+        d1 = mb;
+      } else {
+        // Store the second data byte and action
+        d2 = mb;
+        handleThru(ch, cmd, d1, d2, idx);
+        d1 = 0;
+        d2 = 0;
+      }
+    }
+  }
+}
 
 void OnTimerClockInterrupt() {
   if (currentClockTriggerSource == NATIVE_TRIGGER_SOURCE) {
@@ -346,7 +454,7 @@ void OnTimerClockInterrupt() {
 }
 
 void clockLogic() {
-  
+
   if (skipNextClock == false) {
     if (sequencerTriggerSource == SEQ_CLOCK_TRIGGER) {
       sequencerCurrentStepRead();
@@ -369,23 +477,31 @@ void clockLogic() {
     if (envelopeGenSig0TriggerSource == CLOCK_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
 
       float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig0DecayFactor;
-      adEnv0.SetTime(ADENV_SEG_ATTACK, 0.001f+ fullTimeAttackRelease * slopeFactor);
-      adEnv0.SetTime(ADENV_SEG_DECAY, 0.001f+ fullTimeAttackRelease * (1.0f - slopeFactor));
+
+#ifdef USE_MULTISHAPE_ADSR
+      multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
+      multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
+      multiShapeAdsr0.retrigger();
+#else
+      adEnv0.SetTime(ADENV_SEG_ATTACK, 0.001f + fullTimeAttackRelease * slopeFactor);
+      adEnv0.SetTime(ADENV_SEG_DECAY, 0.001f + fullTimeAttackRelease * (1.0f - slopeFactor));
       adEnv0.Trigger();
-      //multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
-      //multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
-      //multiShapeAdsr0.retrigger();
+#endif
     }
     if (envelopeGenSig1TriggerSource == CLOCK_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
 
       float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig1DecayFactor;
+
+#ifdef USE_MULTISHAPE_ADSR
+      multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
+      multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
+      multiShapeAdsr1.retrigger();
+      setEnvelopeLed(true);
+#else
       adEnv1.SetTime(ADENV_SEG_ATTACK, 0.001f + fullTimeAttackRelease * slopeFactor);
       adEnv1.SetTime(ADENV_SEG_DECAY, 0.001f + fullTimeAttackRelease * (1.0f - slopeFactor));
       adEnv1.Trigger();
-      //multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
-      //multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
-      //multiShapeAdsr1.retrigger();
-      setEnvelopeLed(true);
+#endif
     }
 
 
@@ -422,22 +538,30 @@ void OnTimerPulserInterrupt() {
     if (envelopeGenSig0TriggerSource == PULSER_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
 
       float fullTimeAttackRelease = pulserPeriodSecond * envelopeGenSig0DecayFactor;
-      adEnv0.SetTime(ADENV_SEG_ATTACK, 0.001f+ fullTimeAttackRelease * slopeFactor);
-      adEnv0.SetTime(ADENV_SEG_DECAY, 0.001f+ fullTimeAttackRelease * (1.0f - slopeFactor));
+
+#ifdef USE_MULTISHAPE_ADSR
+      multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
+      multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
+      multiShapeAdsr0.retrigger();
+#else
+      adEnv0.SetTime(ADENV_SEG_ATTACK, 0.001f + fullTimeAttackRelease * slopeFactor);
+      adEnv0.SetTime(ADENV_SEG_DECAY, 0.001f + fullTimeAttackRelease * (1.0f - slopeFactor));
       adEnv0.Trigger();
-      //multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
-      //multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
-      //multiShapeAdsr0.retrigger();
+#endif
     }
     if (envelopeGenSig1TriggerSource == PULSER_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
 
       float fullTimeAttackRelease = pulserPeriodSecond * envelopeGenSig1DecayFactor;
-      adEnv1.SetTime(ADENV_SEG_ATTACK, 0.001f+ fullTimeAttackRelease * slopeFactor);
-      adEnv1.SetTime(ADENV_SEG_DECAY, 0.001f+ fullTimeAttackRelease * (1.0f - slopeFactor));
+
+#ifdef USE_MULTISHAPE_ADSR
+      multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
+      multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
+      multiShapeAdsr1.retrigger();
+#else
+      adEnv1.SetTime(ADENV_SEG_ATTACK, 0.001f + fullTimeAttackRelease * slopeFactor);
+      adEnv1.SetTime(ADENV_SEG_DECAY, 0.001f + fullTimeAttackRelease * (1.0f - slopeFactor));
       adEnv1.Trigger();
-      //multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
-      //multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
-      //multiShapeAdsr1.retrigger();
+#endif
       setEnvelopeLed(true);
     }
     if (avAnPulserPeriod.hasValueUpdated()) {
@@ -462,15 +586,7 @@ void setup() {
   // put your setup code here, to run once:
 
   Serial.begin(115200);
-
-  myMidi.setHandleNoteOn(handleNoteOn);
-  myMidi.setHandleNoteOff(handleNoteOff);
-  myMidi.setHandleClock(handleClock);
-  myMidi.setHandleStart(handleStart);
-  myMidi.setHandleContinue(handleContinue);
-  myMidi.setHandleStop(handleStop);
-  myMidi.begin(MIDI_CHANNEL_OMNI);
-
+  SerialMidi.begin(31250);
 
   pinMode(DI_PATCH_IRQ, INPUT);
 
@@ -531,9 +647,9 @@ void setup() {
   pixels.show();
 
   // DAISY SETUP
-  DAISY.init(DAISY_SEED, AUDIO_SR_16K);
+  DAISY.init(DAISY_SEED, AUDIO_SR_48K);
   sample_rate = DAISY.get_samplerate();
-  half_sample_rate = sample_rate/2;
+  half_sample_rate = sample_rate / 2;
 
   // init complex oscillators
   complexOscSinus.Init(sample_rate);
@@ -554,35 +670,41 @@ void setup() {
   timerClock.resume();  // Start
   timerClock.attachInterrupt(OnTimerClockInterrupt);
 
+
+// init adsr
+#ifdef USE_MULTISHAPE_ADSR
+  multiShapeAdsr0.Init(sample_rate, false);  //true = adsr, false = ar
+  multiShapeAdsr0.setAttackTime(0.05);
+  multiShapeAdsr0.setReleaseTime(0.05);
+  multiShapeAdsr0.setAttackShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  multiShapeAdsr0.setDecayShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  multiShapeAdsr0.setReleaseShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  // multiShapeAdsr0.setDecayTime(0.1); //uncomment if adsr and not just ar
+  // multiShapeAdsr0.setSustainLevel(.7); //uncomment if adsr and not just ar
+#else
   adEnv0.Init(sample_rate);
   adEnv0.SetTime(ADENV_SEG_ATTACK, 0.05);
   adEnv0.SetTime(ADENV_SEG_DECAY, 0.05);
   adEnv0.SetCurve(100);
-  // init adsr
-  //multiShapeAdsr0.Init(sample_rate, false);  //true = adsr, false = ar
-  //multiShapeAdsr0.setAttackTime(0.05);
-  //multiShapeAdsr0.setReleaseTime(0.05);
-  //multiShapeAdsr0.setAttackShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
-  //multiShapeAdsr0.setDecayShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
-  //multiShapeAdsr0.setReleaseShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
-  // //multiShapeAdsr0.setDecayTime(0.1); //uncomment if adsr and not just ar
-  // //multiShapeAdsr0.setSustainLevel(.7); //uncomment if adsr and not just ar
+#endif
 
 
+
+#ifdef USE_MULTISHAPE_ADSR
+  multiShapeAdsr1.Init(sample_rate, false);  //true = adsr, false = ar
+  multiShapeAdsr1.setAttackTime(0.05);
+  multiShapeAdsr1.setReleaseTime(0.1);
+  multiShapeAdsr1.setAttackShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  multiShapeAdsr1.setDecayShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  multiShapeAdsr1.setReleaseShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  // multiShapeAdsr1.setDecayTime(0.1);//uncomment if adsr and not just ar
+  // multiShapeAdsr1.setSustainLevel(.7);//uncomment if adsr and not just ar
+#else
   adEnv1.Init(sample_rate);
   adEnv1.SetTime(ADENV_SEG_ATTACK, 0.05);
   adEnv1.SetTime(ADENV_SEG_DECAY, 0.05);
   adEnv1.SetCurve(100);
-
-  //multiShapeAdsr1.Init(sample_rate, false);  //true = adsr, false = ar
-  //multiShapeAdsr1.setAttackTime(0.05);
-  //multiShapeAdsr1.setReleaseTime(0.1);
-  //multiShapeAdsr1.setAttackShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
-  //multiShapeAdsr1.setDecayShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
-  //multiShapeAdsr1.setReleaseShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
-  // //multiShapeAdsr1.setDecayTime(0.1);//uncomment if adsr and not just ar
-  // //multiShapeAdsr1.setSustainLevel(.7);//uncomment if adsr and not just ar
-
+#endif
   // init lpg
   lowPassGateFilter0.Init(sample_rate);
   lowPassGateFilter0.SetFreq(sample_rate);
@@ -600,15 +722,11 @@ void setup() {
   mcpPinsRead();
   analogsRead();
 
+  //DAISY.SetAudioBlockSize(24);
   DAISY.begin(ProcessAudio);
-  DAISY.SetAudioBlockSize(256);
 }
 
 void loop() {
-  
-  
-  myMidi.read();
-
   capacitiveStateMachine();
   digitalPinsread();
   mcpPinsRead();
@@ -617,23 +735,20 @@ void loop() {
 }
 
 
-
-void handleNoteOn(byte inChannel, byte inNote, byte inVelocity) {
-  Serial.print("handleNoteOn ");
-  Serial.println(inNote);
+void handleNoteOn(int ch, int cmd, int d1, int d2, int idx) {
 
   if (currentClockTriggerSource == MIDI_KEY_TRIGGER_SOURCE) {
     clockLogic();
   }
-  midiFreq = semitone_to_hertz(inNote - 57);
+  midiFreq = semitone_to_hertz(d1 - 57);
 }
-
-void handleNoteOff(byte inChannel, byte inNote, byte inVelocity) {
-  //Serial.println("handleNoteOff");
+void handleNoteOff(int ch, int cmd, int d1, int d2, int idx) {
+}
+void handleThru(int ch, int cmd, int d1, int d2, int idx) {
 }
 
 void handleClock() {
- if (currentClockTriggerSource == MIDI_CLOCK_TRIGGER_SOURCE) {
+  if (currentClockTriggerSource == MIDI_CLOCK_TRIGGER_SOURCE) {
     if (midiCounter % currentTimeDiv == 0) {
       clockLogic();
     }
@@ -654,7 +769,12 @@ void handleStop(void) {
 }
 
 void ProcessAudio(float **in, float **out, size_t size) {
-  
+
+  // read midi in ProcessAudio so it won't be cut by an interrupt
+  while (SerialMidi.available()) {
+    readByteMidi(SerialMidi.read());
+  }
+
   float offsetSig0Adsr;
   float factorSig0Adsr;
 
@@ -684,22 +804,25 @@ void ProcessAudio(float **in, float **out, size_t size) {
     offsetSig1Adsr = 0.0f;
     factorSig1Adsr = 1.0f;
   }
-  
+
   for (size_t i = 0; i < size; i++) {
 
     pulserProcess();
-
-    adsr0Value = adEnv0.Process();////multiShapeAdsr0.Process(false);  // for now there is no gate so we will only have adr
-    adsr1Value = adEnv1.Process();////multiShapeAdsr1.Process(false);  // for now there is no gate so we will only have adr
-
+#ifdef USE_MULTISHAPE_ADSR
+    adsr0Value = multiShapeAdsr0.Process(false);  // for now there is no gate so we will only have adr
+    adsr1Value = multiShapeAdsr1.Process(false);  // for now there is no gate so we will only have adr
+#else
+    adsr0Value = adEnv0.Process();
+    adsr1Value = adEnv1.Process();
+#endif
     // we have attenuated Adsr Value to have a smooth transition between adsr to no adsr
     // those attenuated adsr are only for the lpg and vca, for the patch the non attenuated adsr value is used
     float attenuatedAdsr0Value = offsetSig0Adsr + adsr0Value * factorSig0Adsr;
     float attenuatedAdsr1Value = offsetSig1Adsr + adsr1Value * factorSig1Adsr;
 
 
-    lowPassGateFilter0.SetFreq(half_sample_rate * (attenuatedAdsr0Value*attenuatedAdsr0Value));
-    lowPassGateFilter1.SetFreq(half_sample_rate * (attenuatedAdsr1Value*attenuatedAdsr1Value));
+    lowPassGateFilter0.SetFreq(half_sample_rate * (attenuatedAdsr0Value * attenuatedAdsr0Value));
+    lowPassGateFilter1.SetFreq(half_sample_rate * (attenuatedAdsr1Value * attenuatedAdsr1Value));
 
     float modulatedComplexOscTimbre = computeModulatedComplexOscTimbre();
     float modulatedComplexOscAttenuator = computeModulatedComplexOscAttenuator();
@@ -795,8 +918,6 @@ void ProcessAudio(float **in, float **out, size_t size) {
     out[0][i] = attenuatedComplexMixed;
     out[1][i] = chorused;
   }
-  
-  
 }
 
 void digitalPinsread() {
@@ -812,14 +933,14 @@ void digitalPinsread() {
     };
   }
 }
-uint8_t mcpMaskFromBulk(uint16_t value, uint8_t addr){
-  return ((value >>addr)&0x01);
+uint8_t mcpMaskFromBulk(uint16_t value, uint8_t addr) {
+  return ((value >> addr) & 0x01);
 }
 void mcpPinsRead() {
   uint16_t bulkReadValue = mcp.readGPIOAB();
-  sequencerTrigger = mcpMaskFromBulk(bulkReadValue, DI_SEQUENCER_TRIGGER);// mcp.digitalRead(DI_SEQUENCER_TRIGGER);
-  sequencerStage = mcpMaskFromBulk(bulkReadValue, DI_SEQUENCER_STAGE0) + 2 * mcpMaskFromBulk(bulkReadValue, DI_SEQUENCER_STAGE1);//mcp.digitalRead(DI_SEQUENCER_STAGE0) + 2 * mcp.digitalRead(DI_SEQUENCER_STAGE1);
-  randomTriggerSelect = mcpMaskFromBulk(bulkReadValue, DI_RANDOM_TRIGGERSELECT0) + 2 * mcpMaskFromBulk(bulkReadValue, DI_RANDOM_TRIGGERSELECT1);//mcp.digitalRead(DI_RANDOM_TRIGGERSELECT0) + 2 * mcp.digitalRead(DI_RANDOM_TRIGGERSELECT1);
+  sequencerTrigger = mcpMaskFromBulk(bulkReadValue, DI_SEQUENCER_TRIGGER);                                                                        // mcp.digitalRead(DI_SEQUENCER_TRIGGER);
+  sequencerStage = mcpMaskFromBulk(bulkReadValue, DI_SEQUENCER_STAGE0) + 2 * mcpMaskFromBulk(bulkReadValue, DI_SEQUENCER_STAGE1);                 //mcp.digitalRead(DI_SEQUENCER_STAGE0) + 2 * mcp.digitalRead(DI_SEQUENCER_STAGE1);
+  randomTriggerSelect = mcpMaskFromBulk(bulkReadValue, DI_RANDOM_TRIGGERSELECT0) + 2 * mcpMaskFromBulk(bulkReadValue, DI_RANDOM_TRIGGERSELECT1);  //mcp.digitalRead(DI_RANDOM_TRIGGERSELECT0) + 2 * mcp.digitalRead(DI_RANDOM_TRIGGERSELECT1);
   pulserTriggerSelect = mcpMaskFromBulk(bulkReadValue, DI_PULSER_TRIGGERSELECT0) + 2 * mcpMaskFromBulk(bulkReadValue, DI_PULSER_TRIGGERSELECT1);
   modOscAmFm = mcpMaskFromBulk(bulkReadValue, DI_MODOSC_AMFM);
   complexOscWaveform = mcpMaskFromBulk(bulkReadValue, DI_COMPLEXOSC_WAVEFORM0) + 2 * mcpMaskFromBulk(bulkReadValue, DI_COMPLEXOSC_WAVEFORM1);
@@ -982,11 +1103,14 @@ void analogsRead() {
     //slopeMorphFactor = 0 --> scalar = 100
     //slopeMorphFactor = 1 --> scalar = -100
     Serial.print("1.0f-2.0f*slopeMorphFactor ");
-    Serial.println(1.0f-2.0f*slopeMorphFactor);
-    adEnv0.SetCurve(10.0f-20.0f*slopeMorphFactor);
-    adEnv1.SetCurve(10.0f-20.0f*slopeMorphFactor);
-    //multiShapeAdsr0.setShapeFactor(1.0f - slopeMorphFactor, slopeMorphFactor);
-    //multiShapeAdsr1.setShapeFactor(1.0f - slopeMorphFactor, slopeMorphFactor);
+    Serial.println(1.0f - 2.0f * slopeMorphFactor);
+#ifdef USE_MULTISHAPE_ADSR
+    multiShapeAdsr0.setShapeFactor(1.0f - slopeMorphFactor, slopeMorphFactor);
+    multiShapeAdsr1.setShapeFactor(1.0f - slopeMorphFactor, slopeMorphFactor);
+#else
+    adEnv0.SetCurve(10.0f - 20.0f * slopeMorphFactor);
+    adEnv1.SetCurve(10.0f - 20.0f * slopeMorphFactor);
+#endif
   }
 
   modOscWaveform = simpleAnalogNormalize(avAnModoscWaveform.getVal());
@@ -1118,7 +1242,7 @@ int8_t capacitiveSensorTouch() {
   uint16_t mpr121Touched = cap.touched();
   // get sensor value
   for (int i = 0; i < TOTAL_TOUCH_COUNT; i++) {
-    capacitiveSensorTouched[i] = (mpr121Touched>>i)&0x01;
+    capacitiveSensorTouched[i] = (mpr121Touched >> i) & 0x01;
   }
 
   //detect if we have a touch
@@ -1270,7 +1394,7 @@ void setComplexOscillatorFrequency(float fmModulationFactor) {  //TODO
     finalFrequency = finalFrequency + finalFrequency * fmModulationFactor;
   }
 
-  if(useMidiComplexOsc)
+  if (useMidiComplexOsc)
     finalFrequency = finalFrequency + midiFreq;
 
   complexOscBasis.SetFreq(finalFrequency);
@@ -1291,7 +1415,7 @@ void setModulationOscillatorFrequency() {
     finalFrequency = modOscFrequency;
   }
 
-  if(useMidiModOsc)
+  if (useMidiModOsc)
     finalFrequency = finalFrequency + midiFreq;
 
   modulationOsc.SetSyncFreq(finalFrequency);
