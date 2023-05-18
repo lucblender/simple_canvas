@@ -7,7 +7,7 @@ using namespace daisysp;
 
 #include <Adafruit_NeoPixel.h>
 
-#include "MorphingMultiShapeAdsr.h"
+//#include "MorphingMultiShapeAdsr.h"
 #include "AveragedAnalog.h"
 #include <MIDI.h>
 
@@ -182,11 +182,14 @@ static MoogLadder lowPassGateFilter1;
 
 float frequency = 440;
 float sample_rate;
+float half_sample_rate;
 
 // ---------------------- Custom modules ------------------------
 
-MorphingMultiShapeAdsr multiShapeAdsr0;
-MorphingMultiShapeAdsr multiShapeAdsr1;
+//MorphingMultiShapeAdsr multiShapeAdsr0;
+//MorphingMultiShapeAdsr multiShapeAdsr1;
+AdEnv adEnv0;
+AdEnv adEnv1;
 
 // ----------------- Capacitive sensor ---------------------------
 #define THRESHOLD_TOUCHED 95
@@ -311,7 +314,7 @@ enum CLOCK_TRIGGER_SOURCE { NATIVE_TRIGGER_SOURCE = 0,
                             MIDI_KEY_TRIGGER_SOURCE = 3 };
 
 
-int currentClockTriggerSource = MIDI_CLOCK_TRIGGER_SOURCE;
+int currentClockTriggerSource = MIDI_KEY_TRIGGER_SOURCE;
 
 HardwareSerial SerialMidi(DI_MIDIIN, DI_SYNC_IN);  //DI_SYNC_IN will be overriden as a gpio input
 MIDI_CREATE_INSTANCE(HardwareSerial, SerialMidi, myMidi);
@@ -343,6 +346,7 @@ void OnTimerClockInterrupt() {
 }
 
 void clockLogic() {
+  
   if (skipNextClock == false) {
     if (sequencerTriggerSource == SEQ_CLOCK_TRIGGER) {
       sequencerCurrentStepRead();
@@ -365,18 +369,22 @@ void clockLogic() {
     if (envelopeGenSig0TriggerSource == CLOCK_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
 
       float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig0DecayFactor;
-
-      multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
-      multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
-      multiShapeAdsr0.retrigger();
+      adEnv0.SetTime(ADENV_SEG_ATTACK, 0.001f+ fullTimeAttackRelease * slopeFactor);
+      adEnv0.SetTime(ADENV_SEG_DECAY, 0.001f+ fullTimeAttackRelease * (1.0f - slopeFactor));
+      adEnv0.Trigger();
+      //multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
+      //multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
+      //multiShapeAdsr0.retrigger();
     }
     if (envelopeGenSig1TriggerSource == CLOCK_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_CLOCK_TRIGGER && currentSequencerStepEnable == true)) {
 
       float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig1DecayFactor;
-
-      multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
-      multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
-      multiShapeAdsr1.retrigger();
+      adEnv1.SetTime(ADENV_SEG_ATTACK, 0.001f + fullTimeAttackRelease * slopeFactor);
+      adEnv1.SetTime(ADENV_SEG_DECAY, 0.001f + fullTimeAttackRelease * (1.0f - slopeFactor));
+      adEnv1.Trigger();
+      //multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
+      //multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
+      //multiShapeAdsr1.retrigger();
       setEnvelopeLed(true);
     }
 
@@ -414,18 +422,22 @@ void OnTimerPulserInterrupt() {
     if (envelopeGenSig0TriggerSource == PULSER_TRIGGER || (envelopeGenSig0TriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
 
       float fullTimeAttackRelease = pulserPeriodSecond * envelopeGenSig0DecayFactor;
-
-      multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
-      multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
-      multiShapeAdsr0.retrigger();
+      adEnv0.SetTime(ADENV_SEG_ATTACK, 0.001f+ fullTimeAttackRelease * slopeFactor);
+      adEnv0.SetTime(ADENV_SEG_DECAY, 0.001f+ fullTimeAttackRelease * (1.0f - slopeFactor));
+      adEnv0.Trigger();
+      //multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
+      //multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
+      //multiShapeAdsr0.retrigger();
     }
     if (envelopeGenSig1TriggerSource == PULSER_TRIGGER || (envelopeGenSig1TriggerSource == SEQ_PULSER_TRIGGER && currentSequencerStepEnable == true)) {
 
       float fullTimeAttackRelease = pulserPeriodSecond * envelopeGenSig1DecayFactor;
-
-      multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
-      multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
-      multiShapeAdsr1.retrigger();
+      adEnv1.SetTime(ADENV_SEG_ATTACK, 0.001f+ fullTimeAttackRelease * slopeFactor);
+      adEnv1.SetTime(ADENV_SEG_DECAY, 0.001f+ fullTimeAttackRelease * (1.0f - slopeFactor));
+      adEnv1.Trigger();
+      //multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
+      //multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
+      //multiShapeAdsr1.retrigger();
       setEnvelopeLed(true);
     }
     if (avAnPulserPeriod.hasValueUpdated()) {
@@ -519,8 +531,9 @@ void setup() {
   pixels.show();
 
   // DAISY SETUP
-  DAISY.init(DAISY_SEED, AUDIO_SR_48K);
+  DAISY.init(DAISY_SEED, AUDIO_SR_16K);
   sample_rate = DAISY.get_samplerate();
+  half_sample_rate = sample_rate/2;
 
   // init complex oscillators
   complexOscSinus.Init(sample_rate);
@@ -541,24 +554,34 @@ void setup() {
   timerClock.resume();  // Start
   timerClock.attachInterrupt(OnTimerClockInterrupt);
 
+  adEnv0.Init(sample_rate);
+  adEnv0.SetTime(ADENV_SEG_ATTACK, 0.05);
+  adEnv0.SetTime(ADENV_SEG_DECAY, 0.05);
+  adEnv0.SetCurve(100);
   // init adsr
-  multiShapeAdsr0.Init(sample_rate, false);  //true = adsr, false = ar
-  multiShapeAdsr0.setAttackTime(0.05);
-  multiShapeAdsr0.setReleaseTime(0.05);
-  multiShapeAdsr0.setAttackShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
-  multiShapeAdsr0.setDecayShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
-  multiShapeAdsr0.setReleaseShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
-  // multiShapeAdsr0.setDecayTime(0.1); //uncomment if adsr and not just ar
-  // multiShapeAdsr0.setSustainLevel(.7); //uncomment if adsr and not just ar
+  //multiShapeAdsr0.Init(sample_rate, false);  //true = adsr, false = ar
+  //multiShapeAdsr0.setAttackTime(0.05);
+  //multiShapeAdsr0.setReleaseTime(0.05);
+  //multiShapeAdsr0.setAttackShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  //multiShapeAdsr0.setDecayShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  //multiShapeAdsr0.setReleaseShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  // //multiShapeAdsr0.setDecayTime(0.1); //uncomment if adsr and not just ar
+  // //multiShapeAdsr0.setSustainLevel(.7); //uncomment if adsr and not just ar
 
-  multiShapeAdsr1.Init(sample_rate, false);  //true = adsr, false = ar
-  multiShapeAdsr1.setAttackTime(0.05);
-  multiShapeAdsr1.setReleaseTime(0.1);
-  multiShapeAdsr1.setAttackShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
-  multiShapeAdsr1.setDecayShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
-  multiShapeAdsr1.setReleaseShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
-  // multiShapeAdsr1.setDecayTime(0.1);//uncomment if adsr and not just ar
-  // multiShapeAdsr1.setSustainLevel(.7);//uncomment if adsr and not just ar
+
+  adEnv1.Init(sample_rate);
+  adEnv1.SetTime(ADENV_SEG_ATTACK, 0.05);
+  adEnv1.SetTime(ADENV_SEG_DECAY, 0.05);
+  adEnv1.SetCurve(100);
+
+  //multiShapeAdsr1.Init(sample_rate, false);  //true = adsr, false = ar
+  //multiShapeAdsr1.setAttackTime(0.05);
+  //multiShapeAdsr1.setReleaseTime(0.1);
+  //multiShapeAdsr1.setAttackShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  //multiShapeAdsr1.setDecayShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  //multiShapeAdsr1.setReleaseShapes(QUADRATIC_SHAPE, QUADRATIC_INVERT_SHAPE);
+  // //multiShapeAdsr1.setDecayTime(0.1);//uncomment if adsr and not just ar
+  // //multiShapeAdsr1.setSustainLevel(.7);//uncomment if adsr and not just ar
 
   // init lpg
   lowPassGateFilter0.Init(sample_rate);
@@ -578,10 +601,12 @@ void setup() {
   analogsRead();
 
   DAISY.begin(ProcessAudio);
+  DAISY.SetAudioBlockSize(256);
 }
 
 void loop() {
-
+  
+  
   myMidi.read();
 
   capacitiveStateMachine();
@@ -590,6 +615,7 @@ void loop() {
   analogsRead();
   updateTimedLeds();
 }
+
 
 
 void handleNoteOn(byte inChannel, byte inNote, byte inVelocity) {
@@ -658,13 +684,13 @@ void ProcessAudio(float **in, float **out, size_t size) {
     offsetSig1Adsr = 0.0f;
     factorSig1Adsr = 1.0f;
   }
-
+  
   for (size_t i = 0; i < size; i++) {
 
     pulserProcess();
 
-    adsr0Value = multiShapeAdsr0.Process(false);  // for now there is no gate so we will only have adr
-    adsr1Value = multiShapeAdsr1.Process(false);  // for now there is no gate so we will only have adr
+    adsr0Value = adEnv0.Process();////multiShapeAdsr0.Process(false);  // for now there is no gate so we will only have adr
+    adsr1Value = adEnv1.Process();////multiShapeAdsr1.Process(false);  // for now there is no gate so we will only have adr
 
     // we have attenuated Adsr Value to have a smooth transition between adsr to no adsr
     // those attenuated adsr are only for the lpg and vca, for the patch the non attenuated adsr value is used
@@ -672,8 +698,8 @@ void ProcessAudio(float **in, float **out, size_t size) {
     float attenuatedAdsr1Value = offsetSig1Adsr + adsr1Value * factorSig1Adsr;
 
 
-    lowPassGateFilter0.SetFreq((sample_rate / 2) * (attenuatedAdsr0Value * attenuatedAdsr0Value));
-    lowPassGateFilter1.SetFreq((sample_rate / 2) * (attenuatedAdsr1Value * attenuatedAdsr1Value));
+    lowPassGateFilter0.SetFreq(half_sample_rate * (attenuatedAdsr0Value*attenuatedAdsr0Value));
+    lowPassGateFilter1.SetFreq(half_sample_rate * (attenuatedAdsr1Value*attenuatedAdsr1Value));
 
     float modulatedComplexOscTimbre = computeModulatedComplexOscTimbre();
     float modulatedComplexOscAttenuator = computeModulatedComplexOscAttenuator();
@@ -769,6 +795,7 @@ void ProcessAudio(float **in, float **out, size_t size) {
     out[0][i] = attenuatedComplexMixed;
     out[1][i] = chorused;
   }
+  
   
 }
 
@@ -952,9 +979,14 @@ void analogsRead() {
       slopeFactor = fmap(tmpVal, lowerSlopeFactor, higherSLopeFactor, Mapping::LINEAR);
       slopeMorphFactor = 1.0f;
     }
-
-    multiShapeAdsr0.setShapeFactor(1.0f - slopeMorphFactor, slopeMorphFactor);
-    multiShapeAdsr1.setShapeFactor(1.0f - slopeMorphFactor, slopeMorphFactor);
+    //slopeMorphFactor = 0 --> scalar = 100
+    //slopeMorphFactor = 1 --> scalar = -100
+    Serial.print("1.0f-2.0f*slopeMorphFactor ");
+    Serial.println(1.0f-2.0f*slopeMorphFactor);
+    adEnv0.SetCurve(10.0f-20.0f*slopeMorphFactor);
+    adEnv1.SetCurve(10.0f-20.0f*slopeMorphFactor);
+    //multiShapeAdsr0.setShapeFactor(1.0f - slopeMorphFactor, slopeMorphFactor);
+    //multiShapeAdsr1.setShapeFactor(1.0f - slopeMorphFactor, slopeMorphFactor);
   }
 
   modOscWaveform = simpleAnalogNormalize(avAnModoscWaveform.getVal());
