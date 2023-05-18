@@ -252,7 +252,10 @@ enum {
   INPUT_PRESSED,
   WAIT_OUTPUT,
   OUTPUT_PRESSED,
-  INPUT_CANCELLED
+  INPUT_CANCELLED,
+  WAIT_CONFIGURATION,
+  CONFIGURATION_PRESSED,
+  EXIT_CONFIGURATION
 
 } capacitiveState = IDLE;
 
@@ -269,6 +272,15 @@ int8_t outputPressedIndex;
 #define PULSER_VOLTAGE_LED ENVELOPE_VOLTAGE_LED + 1
 #define RANDOM_VOLTAGE_LED PULSER_VOLTAGE_LED + 1
 #define SEQUENCER_LED RANDOM_VOLTAGE_LED + 1
+
+#define CONFIG_BACK_LED 8
+#define CONFIG_OSC_A_KEYBOARD 4
+#define CONFIG_OSC_B_KEYBOARD 5
+#define CONFIG_NATIVE_TRIGGER_SOURCE 0
+#define CONFIG_SYNC_TRIGGER_SOURCE 1
+#define CONFIG_MIDI_CLOCK_TRIGGER_SOURCE 2
+#define CONFIG_MIDI_KEY_TRIGGER_SOURCE 3
+
 bool envolpeLedStatus = false;
 bool pulserLedStatus = false;
 uint32_t envolpeLedCount = 0;
@@ -352,12 +364,12 @@ int d1 = 0;
 int d2 = 0;
 int idx = -1;
 
-// The midi library recommended by arduino is too unstable to be used 
+// The midi library recommended by arduino is too unstable to be used
 // with interrupts as this project use a lot (timer and audio processing)
 // Made my own midi function convering python lib made by @diyelectromusic
 //  https://diyelectromusic.wordpress.com/
 
-void F(int mb) {
+void readByteMidi(int mb) {
   if (mb == 0xF8) {
     handleClock();
   } else if (mb == 0xFA) {
@@ -1102,8 +1114,6 @@ void analogsRead() {
     }
     //slopeMorphFactor = 0 --> scalar = 100
     //slopeMorphFactor = 1 --> scalar = -100
-    Serial.print("1.0f-2.0f*slopeMorphFactor ");
-    Serial.println(1.0f - 2.0f * slopeMorphFactor);
 #ifdef USE_MULTISHAPE_ADSR
     multiShapeAdsr0.setShapeFactor(1.0f - slopeMorphFactor, slopeMorphFactor);
     multiShapeAdsr1.setShapeFactor(1.0f - slopeMorphFactor, slopeMorphFactor);
@@ -1240,6 +1250,9 @@ int8_t capacitiveSensorTouch() {
 
   int8_t touchedIndex = -1;
   uint16_t mpr121Touched = cap.touched();
+
+  if ((mpr121Touched & 0b111) == 0b111)
+    return 126;
   // get sensor value
   for (int i = 0; i < TOTAL_TOUCH_COUNT; i++) {
     capacitiveSensorTouched[i] = (mpr121Touched >> i) & 0x01;
@@ -1273,6 +1286,7 @@ void capacitiveStateMachine() {
     case WAIT:
       {
         int8_t sensorTouchIndex = capacitiveSensorTouch();
+
         if (sensorTouchIndex > -1 && sensorTouchIndex < INPUT_TOUCH_COUNT) {
           capacitiveState = INPUT_PRESSED;
           inputPressedIndex = sensorTouchIndex;  //goes from 0 to 4
@@ -1298,7 +1312,10 @@ void capacitiveStateMachine() {
         }
 
         int8_t sensorTouchIndex = capacitiveSensorTouch();
-        if (sensorTouchIndex >= INPUT_TOUCH_COUNT && sensorTouchIndex < (INPUT_TOUCH_COUNT + OUTPUT_TOUCH_COUNT)) {
+
+        if (sensorTouchIndex == 126) {
+          capacitiveState = WAIT_CONFIGURATION;
+        } else if (sensorTouchIndex >= INPUT_TOUCH_COUNT && sensorTouchIndex < (INPUT_TOUCH_COUNT + OUTPUT_TOUCH_COUNT)) {
           capacitiveState = OUTPUT_PRESSED;
           outputPressedIndex = sensorTouchIndex - INPUT_TOUCH_COUNT;  //so it goes from 0 to 5
 
@@ -1313,6 +1330,28 @@ void capacitiveStateMachine() {
       break;
 
     case INPUT_CANCELLED:
+      capacitiveState = WAIT;
+      break;
+
+    case WAIT_CONFIGURATION:
+      {
+        int8_t sensorTouchIndex = capacitiveSensorTouch();
+
+        if (sensorTouchIndex == CONFIG_BACK_LED)
+          capacitiveState = EXIT_CONFIGURATION;
+        else if (sensorTouchIndex > -1){
+          capacitiveState = CONFIGURATION_PRESSED;
+          inputPressedIndex = sensorTouchIndex;
+        }
+      }
+      break;
+
+    case CONFIGURATION_PRESSED:
+      capacitiveState = WAIT_CONFIGURATION;
+      break;
+
+    case EXIT_CONFIGURATION:
+
       capacitiveState = WAIT;
       break;
 
@@ -1367,6 +1406,43 @@ void capacitiveStateMachine() {
         pixels.setPixelColor(inputPressedIndex, sourceColor[inputPressedIndex]);
         pixels.show();
         highlightedSource = NONE_SOURCE;
+        break;
+
+      case WAIT_CONFIGURATION:
+        DEBUG_PRINTLN("Enter WAIT_CONFIGURATION State");
+        setConfigurationLeds();
+        break;
+
+      case CONFIGURATION_PRESSED:
+        DEBUG_PRINTLN("Enter CONFIGURATION_PRESSED State");
+
+        if (inputPressedIndex == CONFIG_OSC_A_KEYBOARD) {
+          useMidiComplexOsc = !useMidiComplexOsc;
+        } else if (inputPressedIndex == CONFIG_OSC_B_KEYBOARD) {
+          useMidiModOsc = !useMidiModOsc;
+        } else if (inputPressedIndex == CONFIG_NATIVE_TRIGGER_SOURCE) {
+          currentClockTriggerSource = NATIVE_TRIGGER_SOURCE;
+        } else if (inputPressedIndex == CONFIG_SYNC_TRIGGER_SOURCE) {
+          currentClockTriggerSource = SYNC_TRIGGER_SOURCE;
+        } else if (inputPressedIndex == CONFIG_MIDI_CLOCK_TRIGGER_SOURCE) {
+          currentClockTriggerSource = MIDI_CLOCK_TRIGGER_SOURCE;
+        } else if (inputPressedIndex == CONFIG_MIDI_KEY_TRIGGER_SOURCE) {
+          currentClockTriggerSource = MIDI_KEY_TRIGGER_SOURCE;
+        }
+
+        setConfigurationLeds();
+        break;
+
+      case EXIT_CONFIGURATION:
+        DEBUG_PRINTLN("Enter EXIT_CONFIGURATION State");
+        for (int i = 0; i < OUTPUT_TOUCH_COUNT; i++) {
+          pixels.setPixelColor(i, sourceColor[i]);
+        }
+        for (int i = OUTPUT_TOUCH_COUNT; i < OUTPUT_TOUCH_COUNT + INPUT_TOUCH_COUNT; i++) {
+          pixels.setPixelColor(i, noneColor);
+        }
+
+        pixels.show();
         break;
 
       default:
@@ -1520,6 +1596,27 @@ void setEnvelopeLed(bool ledStatus) {
     pixels.setPixelColor(ENVELOPE_VOLTAGE_LED, envelopesColorHighlighted);
   else
     pixels.setPixelColor(ENVELOPE_VOLTAGE_LED, noneColor);
+  pixels.show();
+}
+
+void setConfigurationLeds() {
+  for (int i = 0; i < OUTPUT_TOUCH_COUNT + INPUT_TOUCH_COUNT; i++) {
+    pixels.setPixelColor(i, noneColor);
+  }
+  if (useMidiComplexOsc)
+    pixels.setPixelColor(CONFIG_OSC_A_KEYBOARD, pixels.Color(255, 255, 255));
+  if (useMidiModOsc)
+    pixels.setPixelColor(CONFIG_OSC_B_KEYBOARD, pixels.Color(255, 255, 255));
+  if (currentClockTriggerSource == NATIVE_TRIGGER_SOURCE)
+    pixels.setPixelColor(CONFIG_NATIVE_TRIGGER_SOURCE, pixels.Color(255, 255, 255));
+  else if (currentClockTriggerSource == SYNC_TRIGGER_SOURCE)
+    pixels.setPixelColor(CONFIG_SYNC_TRIGGER_SOURCE, pixels.Color(255, 255, 255));
+  else if (currentClockTriggerSource == MIDI_CLOCK_TRIGGER_SOURCE)
+    pixels.setPixelColor(CONFIG_MIDI_CLOCK_TRIGGER_SOURCE, pixels.Color(255, 255, 255));
+  else if (currentClockTriggerSource == MIDI_KEY_TRIGGER_SOURCE)
+    pixels.setPixelColor(CONFIG_MIDI_KEY_TRIGGER_SOURCE, pixels.Color(255, 255, 255));
+  pixels.setPixelColor(CONFIG_BACK_LED, pixels.Color(255, 0, 0));
+
   pixels.show();
 }
 
