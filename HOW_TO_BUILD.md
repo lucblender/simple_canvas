@@ -142,6 +142,34 @@ The leds PWM does produce some noise on the audio output. To reduce it, you will
 
 I tried different capacitor values close to 1000 uF until most of the noise disappeared. Adding too big capacitors can create a problem where the daisy seed doesn't boot correctly when plugging the USB due to the charge of the capacitor. By unplugging and replugging the USB, the voltage will be more stable since the capacitor wouldn't have to charge completely and so the daisy will boot properly. Pressing the reset button also works.
 
+#### Use the MIDI-sync-power-dev-board with the Canvas
+
+If you use the Canvas in a eurorack setup, you can add sync in and MIDI capabilities with the [MIDI-sync-power-dev-board](https://github.com/lucblender/MIDI-sync-power-dev-board) expander. 
+
+The MIDI-sync-power-dev-board has a custom 10 pins connector that gives power supply, MIDI in or MIDI out, and Sync in signals. ** Don't mistake the eurorack power supply connector and the expander connector!**
+
+Here is the pinout of this expander connector: 
+
+| Signal names|   |
+|----------|---------|
+| +5V      | +3.3V   |
+| +12V     | -12V    |
+| GND      | GND     |
+| MIDI OUT | GND     |
+| Sync IN  | MIDI IN |
+
+For the Canvas we only need a power supply (+5V, GND), MIDI IN, and Sync IN.
+
+To connect it to the Canvas, I used 10 wires ribbon cable and 10 pins connector similar to the eurorack power supply. On the Canvas side, you'll need 10 pins / 2 rows connectors with 2.54mm pitch. In my case, I used a little veroboard to have it.
+
+![Expander connector on veroboard](resources/pictures/Instructions%20(14).jpg)
+
+You can now add some wires from this connector to the Canvas. Search for _expander_ in the Component type column of the cheat sheet to find which signals to connect.
+
+Finally, add a ribbon cable between the MIDI-sync-power-dev-board and the Canvas.
+
+![Expander connector with ribbon cable](resources/pictures/Instructions%20(15).jpg)
+
 #### One last tip
 
 If you have your daisy on the top of the PCB, it will be complicated to access the boot and reset button to reprogram it. To avoid having to remove all the bolts and potentiometer caps each time you want to reprogram it, you can put some buttons in parallel to the daisy buttons with some wrapping wires as shown in the following pictures:

@@ -33,6 +33,12 @@ With only the oscillators and VCA/LPG, the synthesizer is quite dull. To make it
 
 In addition, the sequencer, random voltage, pulser, and envelopes can be triggered by a different source: the clock, pulser, and sequencer. This feature lets you have three distinct tempos running in the instrument.
 
+### Sync the Canvas with your setup using eurorack module
+
+It is possible to use the eurorack module [MIDI-sync-power-dev-board](https://github.com/lucblender/MIDI-sync-power-dev-board) to power up the canvas and use a sync in and MIDI input.
+
+More information on how to wire the Canvas to the MIDI-sync-power-dev-board at the end of the [how to build instructions](HOW_TO_BUILD.md).
+
 # Requirement
 
 The Canvas is made using Arduino IDE. You'll need the following dependencies:
