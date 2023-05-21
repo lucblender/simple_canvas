@@ -334,13 +334,13 @@ enum CLOCK_TRIGGER_SOURCE { NATIVE_TRIGGER_SOURCE = 0,
                             MIDI_KEY_TRIGGER_SOURCE = 3 };
 
 
-int currentClockTriggerSource = MIDI_KEY_TRIGGER_SOURCE;
+int currentClockTriggerSource = NATIVE_TRIGGER_SOURCE;
 
 HardwareSerial SerialMidi(DI_MIDIIN, DI_SYNC_IN);  //DI_SYNC_IN will be overriden as a gpio input
 bool isMidiReadAvailable = true;
 
-bool useMidiComplexOsc = true;
-bool useMidiModOsc = true;
+bool useMidiComplexOsc = false;
+bool useMidiModOsc = false;
 float midiFreq;
 
 enum TIME_DIVISION { ONE_FOURTH = 24,
