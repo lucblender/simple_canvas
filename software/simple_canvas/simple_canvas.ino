@@ -198,6 +198,7 @@ MorphingMultiShapeAdsr multiShapeAdsr1;
 AdEnv adEnv0;
 AdEnv adEnv1;
 #endif
+#define MINIMUM_TIME_ATTACK_RELEASE 0.0001f
 
 // ----------------- Capacitive sensor ---------------------------
 #define THRESHOLD_TOUCHED 95
@@ -491,12 +492,12 @@ void clockLogic() {
       float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig0DecayFactor;
 
 #ifdef USE_MULTISHAPE_ADSR
-      multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
-      multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
+      multiShapeAdsr0.setAttackTime(MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * slopeFactor);
+      multiShapeAdsr0.setReleaseTime(MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * (1.0f - slopeFactor));
       multiShapeAdsr0.retrigger();
 #else
-      adEnv0.SetTime(ADENV_SEG_ATTACK, 0.001f + fullTimeAttackRelease * slopeFactor);
-      adEnv0.SetTime(ADENV_SEG_DECAY, 0.001f + fullTimeAttackRelease * (1.0f - slopeFactor));
+      adEnv0.SetTime(ADENV_SEG_ATTACK, MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * slopeFactor);
+      adEnv0.SetTime(ADENV_SEG_DECAY, MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * (1.0f - slopeFactor));
       adEnv0.Trigger();
 #endif
     }
@@ -505,13 +506,13 @@ void clockLogic() {
       float fullTimeAttackRelease = clockPeriodSecond * envelopeGenSig1DecayFactor;
 
 #ifdef USE_MULTISHAPE_ADSR
-      multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
-      multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
+      multiShapeAdsr1.setAttackTime(MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * slopeFactor);
+      multiShapeAdsr1.setReleaseTime(MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * (1.0f - slopeFactor));
       multiShapeAdsr1.retrigger();
       setEnvelopeLed(true);
 #else
-      adEnv1.SetTime(ADENV_SEG_ATTACK, 0.001f + fullTimeAttackRelease * slopeFactor);
-      adEnv1.SetTime(ADENV_SEG_DECAY, 0.001f + fullTimeAttackRelease * (1.0f - slopeFactor));
+      adEnv1.SetTime(ADENV_SEG_ATTACK, MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * slopeFactor);
+      adEnv1.SetTime(ADENV_SEG_DECAY, MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * (1.0f - slopeFactor));
       adEnv1.Trigger();
 #endif
     }
@@ -552,12 +553,12 @@ void OnTimerPulserInterrupt() {
       float fullTimeAttackRelease = pulserPeriodSecond * envelopeGenSig0DecayFactor;
 
 #ifdef USE_MULTISHAPE_ADSR
-      multiShapeAdsr0.setAttackTime(fullTimeAttackRelease * slopeFactor);
-      multiShapeAdsr0.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
+      multiShapeAdsr0.setAttackTime(MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * slopeFactor);
+      multiShapeAdsr0.setReleaseTime(MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * (1.0f - slopeFactor));
       multiShapeAdsr0.retrigger();
 #else
-      adEnv0.SetTime(ADENV_SEG_ATTACK, 0.001f + fullTimeAttackRelease * slopeFactor);
-      adEnv0.SetTime(ADENV_SEG_DECAY, 0.001f + fullTimeAttackRelease * (1.0f - slopeFactor));
+      adEnv0.SetTime(ADENV_SEG_ATTACK, MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * slopeFactor);
+      adEnv0.SetTime(ADENV_SEG_DECAY, MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * (1.0f - slopeFactor));
       adEnv0.Trigger();
 #endif
     }
@@ -566,19 +567,18 @@ void OnTimerPulserInterrupt() {
       float fullTimeAttackRelease = pulserPeriodSecond * envelopeGenSig1DecayFactor;
 
 #ifdef USE_MULTISHAPE_ADSR
-      multiShapeAdsr1.setAttackTime(fullTimeAttackRelease * slopeFactor);
-      multiShapeAdsr1.setReleaseTime(fullTimeAttackRelease * (1.0f - slopeFactor));
+      multiShapeAdsr1.setAttackTime(MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * slopeFactor);
+      multiShapeAdsr1.setReleaseTime(MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * (1.0f - slopeFactor));
       multiShapeAdsr1.retrigger();
 #else
-      adEnv1.SetTime(ADENV_SEG_ATTACK, 0.001f + fullTimeAttackRelease * slopeFactor);
-      adEnv1.SetTime(ADENV_SEG_DECAY, 0.001f + fullTimeAttackRelease * (1.0f - slopeFactor));
+      adEnv1.SetTime(ADENV_SEG_ATTACK, MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * slopeFactor);
+      adEnv1.SetTime(ADENV_SEG_DECAY, MINIMUM_TIME_ATTACK_RELEASE + fullTimeAttackRelease * (1.0f - slopeFactor));
       adEnv1.Trigger();
 #endif
       setEnvelopeLed(true);
     }
     if (avAnPulserPeriod.hasValueUpdated()) {
-      float normalizedPulserVal = simpleAnalogNormalize(avAnPulserPeriod.getVal());
-      pulserPeriod = fmap(normalizedPulserVal, 0, 6.0f, Mapping::EXP);  //0..6Hz = 0..360 bpm --> double of clock
+      pulserPeriod =simpleAnalogNormalize(avAnPulserPeriod.getVal()) * 6.0f;  //0..6Hz = 0..360 bpm --> double of clock
       skipNextPulser = true;                                            // when we reset the timer, it will trigger the interrupt directly, so we need to skip it once
       setPulserFrequency(pulserPeriod);
     }
@@ -1131,17 +1131,17 @@ void analogsRead() {
   if (avAnComplexoscFrequency.hasValueUpdated()) {  //TODO make this better
     float complexOscVal = simpleAnalogNormalize(avAnComplexoscFrequency.getFVal());
     if (complexOscVal < 0.5)
-      complexOscFrequency = fmap(complexOscVal * 2.0f, 0, 3000, Mapping::EXP);
+      complexOscFrequency = fmap(complexOscVal * 2.0f, 0, 880, Mapping::EXP);
     else
-      complexOscFrequency = fmap((complexOscVal - 0.5f) * 2.0f, 3000, 8000, Mapping::LINEAR);
+      complexOscFrequency = fmap((complexOscVal - 0.5f) * 2.0f, 880, 1760, Mapping::LINEAR);
   }
 
   if (avAnModoscFrequency.hasValueUpdated()) {  //TODO make this better
     float normalizedModOscVal = simpleAnalogNormalize(avAnModoscFrequency.getFVal());
     if (normalizedModOscVal < 0.5)
-      modOscFrequency = fmap(normalizedModOscVal * 2.0f, 0, 3000, Mapping::EXP);
+      modOscFrequency = fmap(normalizedModOscVal * 2.0f, 0, 880, Mapping::EXP);
     else
-      modOscFrequency = fmap((normalizedModOscVal - 0.5f) * 2.0f, 3000, 8000, Mapping::LINEAR);
+      modOscFrequency = fmap((normalizedModOscVal - 0.5f) * 2.0f, 880, 1760, Mapping::LINEAR);
   }
 
   if (avAnModoscWaveform.hasValueUpdated()) {
