@@ -1434,17 +1434,24 @@ void capacitiveStateMachine() {
         break;
 
       case EXIT_CONFIGURATION:
+      {
         DEBUG_PRINTLN("Enter EXIT_CONFIGURATION State");
         for (int i = 0; i < OUTPUT_TOUCH_COUNT; i++) {
           pixels.setPixelColor(i, sourceColor[i]);
         }
-        for (int i = OUTPUT_TOUCH_COUNT; i < OUTPUT_TOUCH_COUNT + INPUT_TOUCH_COUNT; i++) {
-          pixels.setPixelColor(i, noneColor);
+        int patchCounter = 0;
+        for (int i = OUTPUT_TOUCH_COUNT-1; i < OUTPUT_TOUCH_COUNT + INPUT_TOUCH_COUNT; i++) {
+          //put patch correct color back
+          if(destinationPatches[patchCounter]  == -1)
+            pixels.setPixelColor(i, noneColor);
+          else          
+            pixels.setPixelColor(i, sourceColor[destinationPatches[patchCounter]]);
+          patchCounter++;
         }
 
         pixels.show();
         break;
-
+      }
       default:
         DEBUG_PRINTLN("Enter default State");
         //Error
